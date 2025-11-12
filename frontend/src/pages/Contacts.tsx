@@ -29,33 +29,26 @@ import {
   TwitterOutlined
 } from '@ant-design/icons';
 import { api } from '../services/api';
+import { contactService, Contact as ServiceContact, CreateContactData } from '../services/contactService';
 
 const { Search } = Input;
 const { Option } = Select;
 
-interface Contact {
-  id: number;
-  firstName: string;
-  lastName: string;
-  email: string;
-  phone?: string;
-  jobTitle?: string;
-  companyId?: number;
-  company?: {
-    id: number;
-    name: string;
-  };
-  socialProfiles?: {
-    linkedin?: string;
-    twitter?: string;
-  };
-  tags?: string[];
-  createdAt: string;
-}
+// Use the Contact interface from the service
+type Contact = ServiceContact;
 
 interface Company {
-  id: number;
+  id: string;
   name: string;
+  industry?: string;
+  size?: string;
+}
+
+interface CompaniesResponse {
+  success: boolean;
+  data: {
+    companies: Company[];
+  };
 }
 
 const Contacts: React.FC = () => {
@@ -63,25 +56,42 @@ const Contacts: React.FC = () => {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchText, setSearchText] = useState('');
+  const [pagination, setPagination] = useState({
+    current: 1,
+    pageSize: 10,
+    total: 0,
+  });
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [isDrawerVisible, setIsDrawerVisible] = useState(false);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [form] = Form.useForm();
+  const [initialFormValues, setInitialFormValues] = useState<any>({});
 
   useEffect(() => {
-    loadContacts();
+    loadContacts(1, 10);
     loadCompanies();
   }, []);
 
-  const loadContacts = async () => {
+  const loadContacts = async (page: number = 1, limit: number = 10, search?: string) => {
     try {
       setLoading(true);
-      const response = await api.get('/contacts');
-      setContacts(response.data.contacts || []);
-    } catch (error) {
+      const filters = { page, limit };
+      if (search) (filters as any).search = search;
+      
+      const response = await contactService.getContacts(filters);
+      
+      if (response.success) {
+        setContacts(response.data.contacts);
+        setPagination({
+          current: response.data.pagination.currentPage,
+          pageSize: response.data.pagination.itemsPerPage,
+          total: response.data.pagination.totalItems,
+        });
+      }
+    } catch (error: any) {
       console.error('Failed to load contacts:', error);
-      message.error('Failed to load contacts');
+      message.error(error.response?.data?.error?.message || 'Failed to load contacts');
     } finally {
       setLoading(false);
     }
@@ -89,32 +99,48 @@ const Contacts: React.FC = () => {
 
   const loadCompanies = async () => {
     try {
-      const response = await api.get('/companies');
-      setCompanies(response.data.companies || []);
-    } catch (error) {
+      console.log('Loading companies with api baseURL:', api.defaults.baseURL);
+      const response = await api.get<CompaniesResponse>('/companies');
+      console.log('Companies response:', response);
+      if (response.data.success) {
+        setCompanies(response.data.data.companies);
+      }
+    } catch (error: any) {
       console.error('Failed to load companies:', error);
+      message.error(error.response?.data?.error?.message || 'Failed to load companies');
     }
   };
 
   const handleAddContact = () => {
     setEditingContact(null);
+    setInitialFormValues({
+      source: 'manual',
+      leadStatus: 'new',
+      leadScore: 0,
+    });
     setIsModalVisible(true);
-    form.resetFields();
   };
 
   const handleEditContact = (contact: Contact) => {
     setEditingContact(contact);
-    setIsModalVisible(true);
-    form.setFieldsValue({
+    const formValues = {
       firstName: contact.firstName,
       lastName: contact.lastName,
       email: contact.email,
       phone: contact.phone,
       jobTitle: contact.jobTitle,
+      department: contact.department,
+      seniorityLevel: contact.seniorityLevel,
       companyId: contact.companyId,
-      linkedinUrl: contact.socialProfiles?.linkedin,
-      twitterUrl: contact.socialProfiles?.twitter,
-    });
+      linkedinUrl: contact.linkedinUrl,
+      twitterHandle: contact.twitterHandle,
+      source: contact.source,
+      leadStatus: contact.leadStatus,
+      leadScore: contact.leadScore,
+      notes: contact.notes,
+    };
+    setInitialFormValues(formValues);
+    setIsModalVisible(true);
   };
 
   const handleViewContact = (contact: Contact) => {
@@ -122,53 +148,90 @@ const Contacts: React.FC = () => {
     setIsDrawerVisible(true);
   };
 
-  const handleDeleteContact = async (contactId: number) => {
+  const handleDeleteContact = async (contactId: string) => {
     try {
-      await api.delete(`/contacts/${contactId}`);
+      await contactService.deleteContact(contactId);
       message.success('Contact deleted successfully');
-      loadContacts();
-    } catch (error) {
+      loadContacts(pagination.current, pagination.pageSize, searchText);
+    } catch (error: any) {
       console.error('Failed to delete contact:', error);
-      message.error('Failed to delete contact');
+      message.error(error.response?.data?.error?.message || 'Failed to delete contact');
     }
   };
 
   const handleModalSubmit = async (values: any) => {
     try {
-      const contactData = {
+      const contactData: CreateContactData = {
         firstName: values.firstName,
         lastName: values.lastName,
         email: values.email,
         phone: values.phone,
         jobTitle: values.jobTitle,
+        department: values.department,
+        seniorityLevel: values.seniorityLevel,
         companyId: values.companyId,
-        socialProfiles: {
-          linkedin: values.linkedinUrl,
-          twitter: values.twitterUrl,
-        }
+        linkedinUrl: values.linkedinUrl,
+        twitterHandle: values.twitterHandle,
+        source: values.source || 'manual',
+        leadStatus: values.leadStatus || 'new',
+        leadScore: values.leadScore || 0,
+        notes: values.notes,
       };
 
+      // Clean up the data - remove empty strings and undefined values
+      const cleanedData: any = { ...contactData };
+      Object.keys(cleanedData).forEach(key => {
+        const value = cleanedData[key];
+        if (value === '' || value === undefined || value === null) {
+          delete cleanedData[key];
+        }
+      });
+
+      // For updates, only send non-empty fields
+      const finalData = editingContact ? cleanedData : contactData;
+
+      console.log('Sending contact data:', finalData);
+
       if (editingContact) {
-        await api.put(`/contacts/${editingContact.id}`, contactData);
+        await contactService.updateContact(editingContact.id, finalData);
         message.success('Contact updated successfully');
       } else {
-        await api.post('/contacts', contactData);
+        await contactService.createContact(finalData);
         message.success('Contact created successfully');
       }
 
       setIsModalVisible(false);
+      setInitialFormValues({});
       form.resetFields();
-      loadContacts();
-    } catch (error) {
+      loadContacts(pagination.current, pagination.pageSize, searchText);
+    } catch (error: any) {
       console.error('Failed to save contact:', error);
-      message.error('Failed to save contact');
+      console.error('Error response:', error.response?.data);
+      
+      // Handle validation errors
+      if (error.response?.status === 400) {
+        if (error.response?.data?.errors) {
+          // Express-validator format
+          const validationErrors = error.response.data.errors.map((err: any) => `${err.path}: ${err.msg}`).join(', ');
+          message.error(`Validation errors: ${validationErrors}`);
+        } else if (error.response?.data?.error?.details) {
+          // Sequelize validation format
+          const validationErrors = error.response.data.error.details.map((err: any) => `${err.field}: ${err.message}`).join(', ');
+          message.error(`Validation errors: ${validationErrors}`);
+        } else {
+          message.error(error.response?.data?.error?.message || 'Validation failed');
+        }
+      } else {
+        message.error(error.response?.data?.error?.message || 'Failed to save contact');
+      }
     }
   };
 
   const filteredContacts = contacts.filter(contact =>
     `${contact.firstName} ${contact.lastName}`.toLowerCase().includes(searchText.toLowerCase()) ||
-    contact.email.toLowerCase().includes(searchText.toLowerCase()) ||
-    contact.company?.name?.toLowerCase().includes(searchText.toLowerCase())
+    contact.email?.toLowerCase().includes(searchText.toLowerCase()) ||
+    contact.company?.name?.toLowerCase().includes(searchText.toLowerCase()) ||
+    contact.jobTitle?.toLowerCase().includes(searchText.toLowerCase())
   );
 
   const columns = [
@@ -218,20 +281,20 @@ const Contacts: React.FC = () => {
       key: 'social',
       render: (contact: Contact) => (
         <Space>
-          {contact.socialProfiles?.linkedin && (
+          {contact.linkedinUrl && (
             <Button 
               type="link" 
               icon={<LinkedinOutlined />} 
-              href={contact.socialProfiles.linkedin}
+              href={contact.linkedinUrl}
               target="_blank"
               size="small"
             />
           )}
-          {contact.socialProfiles?.twitter && (
+          {contact.twitterHandle && (
             <Button 
               type="link" 
               icon={<TwitterOutlined />} 
-              href={contact.socialProfiles.twitter}
+              href={`https://twitter.com/${contact.twitterHandle.replace('@', '')}`}
               target="_blank"
               size="small"
             />
@@ -240,13 +303,16 @@ const Contacts: React.FC = () => {
       ),
     },
     {
-      title: 'Tags',
-      key: 'tags',
+      title: 'Status & Score',
+      key: 'status',
       render: (contact: Contact) => (
-        <Space>
-          {contact.tags?.map(tag => (
-            <Tag key={tag} color="blue">{tag}</Tag>
-          ))}
+        <Space direction="vertical" size="small">
+          <Tag color={contact.leadStatus === 'converted' ? 'green' : contact.leadStatus === 'qualified' ? 'blue' : 'default'}>
+            {contact.leadStatus?.toUpperCase()}
+          </Tag>
+          <div style={{ fontSize: '12px', color: '#666' }}>
+            Score: {contact.leadScore}/100
+          </div>
         </Space>
       ),
     },
@@ -292,9 +358,14 @@ const Contacts: React.FC = () => {
           <Space>
             <Search
               placeholder="Search contacts..."
+              onSearch={(value) => {
+                setSearchText(value);
+                loadContacts(1, pagination.pageSize, value);
+              }}
               onChange={(e) => setSearchText(e.target.value)}
               style={{ width: 300 }}
               prefix={<SearchOutlined />}
+              allowClear
             />
             <Button 
               type="primary" 
@@ -312,8 +383,16 @@ const Contacts: React.FC = () => {
           rowKey="id"
           loading={loading}
           pagination={{
-            pageSize: 10,
+            ...pagination,
             showTotal: (total) => `Total ${total} contacts`,
+            showSizeChanger: true,
+            showQuickJumper: true,
+            onChange: (page, pageSize) => {
+              loadContacts(page, pageSize, searchText);
+            },
+            onShowSizeChange: (current, size) => {
+              loadContacts(1, size, searchText);
+            },
           }}
         />
       </Card>
@@ -322,7 +401,11 @@ const Contacts: React.FC = () => {
       <Modal
         title={editingContact ? 'Edit Contact' : 'Add New Contact'}
         open={isModalVisible}
-        onCancel={() => setIsModalVisible(false)}
+        onCancel={() => {
+          setIsModalVisible(false);
+          setInitialFormValues({});
+          form.resetFields();
+        }}
         footer={null}
         width={600}
       >
@@ -330,6 +413,8 @@ const Contacts: React.FC = () => {
           form={form}
           layout="vertical"
           onFinish={handleModalSubmit}
+          initialValues={initialFormValues}
+          key={editingContact?.id || 'new'}
         >
           <Row gutter={16}>
             <Col span={12}>
@@ -376,6 +461,26 @@ const Contacts: React.FC = () => {
             </Col>
           </Row>
 
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="department" label="Department">
+                <Input placeholder="Enter department" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="seniorityLevel" label="Seniority Level">
+                <Select placeholder="Select seniority level" allowClear>
+                  <Option value="entry">Entry Level</Option>
+                  <Option value="mid">Mid Level</Option>
+                  <Option value="senior">Senior Level</Option>
+                  <Option value="director">Director</Option>
+                  <Option value="vp">Vice President</Option>
+                  <Option value="c_level">C-Level</Option>
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+
           <Form.Item name="companyId" label="Company">
             <Select placeholder="Select company" allowClear>
               {companies.map(company => (
@@ -384,6 +489,41 @@ const Contacts: React.FC = () => {
                 </Option>
               ))}
             </Select>
+          </Form.Item>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="source" label="Source">
+                <Select placeholder="Select source">
+                  <Option value="manual">Manual</Option>
+                  <Option value="linkedin">LinkedIn</Option>
+                  <Option value="twitter">Twitter</Option>
+                  <Option value="referral">Referral</Option>
+                  <Option value="website">Website</Option>
+                  <Option value="email_campaign">Email Campaign</Option>
+                  <Option value="cold_outreach">Cold Outreach</Option>
+                  <Option value="event">Event</Option>
+                  <Option value="pdl_discovery">PDL Discovery</Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="leadStatus" label="Lead Status">
+                <Select placeholder="Select status">
+                  <Option value="new">New</Option>
+                  <Option value="contacted">Contacted</Option>
+                  <Option value="qualified">Qualified</Option>
+                  <Option value="unqualified">Unqualified</Option>
+                  <Option value="nurturing">Nurturing</Option>
+                  <Option value="converted">Converted</Option>
+                  <Option value="lost">Lost</Option>
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Form.Item name="leadScore" label="Lead Score (0-100)">
+            <Input type="number" min="0" max="100" placeholder="Enter lead score" />
           </Form.Item>
 
           <Divider orientation="left">Social Profiles</Divider>
@@ -395,10 +535,17 @@ const Contacts: React.FC = () => {
             />
           </Form.Item>
 
-          <Form.Item name="twitterUrl" label="Twitter Profile">
+          <Form.Item name="twitterHandle" label="Twitter Handle">
             <Input 
-              placeholder="https://twitter.com/username" 
+              placeholder="@username or username" 
               prefix={<TwitterOutlined />}
+            />
+          </Form.Item>
+
+          <Form.Item name="notes" label="Notes">
+            <Input.TextArea 
+              rows={3}
+              placeholder="Additional notes about this contact..."
             />
           </Form.Item>
 
@@ -455,31 +602,57 @@ const Contacts: React.FC = () => {
                 </div>
               )}
 
-              {(selectedContact.socialProfiles?.linkedin || selectedContact.socialProfiles?.twitter) && (
+              {(selectedContact.linkedinUrl || selectedContact.twitterHandle) && (
                 <div>
                   <strong>Social Profiles:</strong>
                   <div>
-                    {selectedContact.socialProfiles.linkedin && (
+                    {selectedContact.linkedinUrl && (
                       <Button 
                         type="link" 
                         icon={<LinkedinOutlined />}
-                        href={selectedContact.socialProfiles.linkedin}
+                        href={selectedContact.linkedinUrl}
                         target="_blank"
                       >
                         LinkedIn
                       </Button>
                     )}
-                    {selectedContact.socialProfiles.twitter && (
+                    {selectedContact.twitterHandle && (
                       <Button 
                         type="link" 
                         icon={<TwitterOutlined />}
-                        href={selectedContact.socialProfiles.twitter}
+                        href={`https://twitter.com/${selectedContact.twitterHandle.replace('@', '')}`}
                         target="_blank"
                       >
                         Twitter
                       </Button>
                     )}
                   </div>
+                </div>
+              )}
+
+              <div>
+                <strong>Status:</strong>
+                <div>
+                  <Tag color={selectedContact.leadStatus === 'converted' ? 'green' : selectedContact.leadStatus === 'qualified' ? 'blue' : 'default'}>
+                    {selectedContact.leadStatus?.toUpperCase()}
+                  </Tag>
+                </div>
+              </div>
+
+              <div>
+                <strong>Lead Score:</strong>
+                <div>{selectedContact.leadScore}/100</div>
+              </div>
+
+              <div>
+                <strong>Source:</strong>
+                <div>{selectedContact.source}</div>
+              </div>
+
+              {selectedContact.notes && (
+                <div>
+                  <strong>Notes:</strong>
+                  <div>{selectedContact.notes}</div>
                 </div>
               )}
 

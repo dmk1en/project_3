@@ -6,6 +6,8 @@ const PipelineStage = require('./PipelineStage');
 const Opportunity = require('./Opportunity');
 const Activity = require('./Activity');
 const SocialProfile = require('./SocialProfile');
+const PotentialLead = require('./PotentialLead');
+const PdlSearchQuery = require('./PdlSearchQuery');
 
 // User associations
 User.hasMany(UserSession, { foreignKey: 'userId', as: 'sessions' });
@@ -45,6 +47,13 @@ Activity.belongsTo(User, { foreignKey: 'assignedTo', as: 'assignedUser' });
 // SocialProfile associations
 SocialProfile.belongsTo(Contact, { foreignKey: 'contactId', as: 'contact' });
 
+// PDL associations
+PotentialLead.belongsTo(User, { foreignKey: 'reviewedBy', as: 'reviewer' });
+User.hasMany(PotentialLead, { foreignKey: 'reviewedBy', as: 'reviewedLeads' });
+
+PdlSearchQuery.belongsTo(User, { foreignKey: 'createdBy', as: 'creator' });
+User.hasMany(PdlSearchQuery, { foreignKey: 'createdBy', as: 'searchQueries' });
+
 module.exports = {
   User,
   UserSession,
@@ -53,5 +62,7 @@ module.exports = {
   PipelineStage,
   Opportunity,
   Activity,
-  SocialProfile
+  SocialProfile,
+  PotentialLead,
+  PdlSearchQuery
 };

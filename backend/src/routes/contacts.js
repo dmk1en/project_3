@@ -114,7 +114,7 @@ router.post('/', [
     .withMessage('Twitter handle must be 1-100 characters'),
   body('source')
     .notEmpty()
-    .isIn(['manual', 'linkedin', 'twitter', 'referral', 'website', 'email_campaign', 'cold_outreach', 'event'])
+    .isIn(['manual', 'linkedin', 'twitter', 'referral', 'website', 'email_campaign', 'cold_outreach', 'event', 'pdl_discovery'])
     .withMessage('Valid source is required'),
   body('leadScore')
     .optional()
@@ -191,7 +191,7 @@ router.put('/:id', [
     .withMessage('Twitter handle must be 1-100 characters'),
   body('source')
     .optional()
-    .isIn(['manual', 'linkedin', 'twitter', 'referral', 'website', 'email_campaign', 'cold_outreach', 'event'])
+    .isIn(['manual', 'linkedin', 'twitter', 'referral', 'website', 'email_campaign', 'cold_outreach', 'event', 'pdl_discovery'])
     .withMessage('Valid source is required'),
   body('leadScore')
     .optional()
