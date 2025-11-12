@@ -530,13 +530,365 @@ class AnalyticsController {
   }
 
   async getPipelineAnalysis(dateRange, filters) {
-    // Implementation for pipeline analysis
-    return { message: 'Pipeline analysis implementation' };
+    const whereClause = {};
+    if (dateRange?.start && dateRange?.end) {
+      whereClause.createdAt = {
+        [Op.between]: [new Date(dateRange.start), new Date(dateRange.end)]
+      };
+    }
+
+    // Pipeline velocity - average time opportunities spend in each stage
+    const pipelineVelocity = await PipelineStage.findAll({
+      attributes: [
+        'id',
+        'name',
+        'displayOrder',
+        'probabilityPercent'
+      ],
+      include: [{
+        model: Opportunity,
+        as: 'opportunities',
+        attributes: [],
+        where: whereClause,
+        required: false
+      }],
+      order: [['displayOrder', 'ASC']]
+    });
+
+    // Stage conversion rates - opportunities moving between stages
+    const stageMovements = await Activity.findAll({
+      attributes: [
+        'subject',
+        [fn('COUNT', col('Activity.id')), 'movements']
+      ],
+      where: {
+        type: 'stage_change',
+        ...whereClause
+      },
+      group: ['subject'],
+      raw: true
+    });
+
+    // Deal size analysis by stage
+    const dealSizeByStage = await PipelineStage.findAll({
+      attributes: [
+        'id',
+        'name',
+        [fn('COUNT', col('opportunities.id')), 'count'],
+        [fn('AVG', col('opportunities.value')), 'avgValue'],
+        [fn('SUM', col('opportunities.value')), 'totalValue'],
+        [fn('MIN', col('opportunities.value')), 'minValue'],
+        [fn('MAX', col('opportunities.value')), 'maxValue']
+      ],
+      include: [{
+        model: Opportunity,
+        as: 'opportunities',
+        attributes: [],
+        where: whereClause,
+        required: false
+      }],
+      group: ['PipelineStage.id'],
+      raw: false
+    });
+
+    return {
+      pipelineVelocity: pipelineVelocity.map(stage => ({
+        stageId: stage.id,
+        name: stage.name,
+        displayOrder: stage.displayOrder,
+        probabilityPercent: stage.probabilityPercent
+      })),
+      stageMovements: stageMovements.map(movement => ({
+        transition: movement.subject,
+        count: parseInt(movement.movements)
+      })),
+      dealSizeAnalysis: dealSizeByStage.map(stage => ({
+        stageId: stage.id,
+        name: stage.name,
+        count: parseInt(stage.dataValues.count) || 0,
+        avgValue: parseFloat(stage.dataValues.avgValue) || 0,
+        totalValue: parseFloat(stage.dataValues.totalValue) || 0,
+        minValue: parseFloat(stage.dataValues.minValue) || 0,
+        maxValue: parseFloat(stage.dataValues.maxValue) || 0
+      }))
+    };
   }
 
   async getUserPerformance(dateRange, filters) {
-    // Implementation for user performance
-    return { message: 'User performance implementation' };
+    const whereClause = {};
+    if (dateRange?.start && dateRange?.end) {
+      whereClause.createdAt = {
+        [Op.between]: [new Date(dateRange.start), new Date(dateRange.end)]
+      };
+    }
+
+    // User performance metrics
+    const userStats = await User.findAll({
+      attributes: [
+        'id',
+        'firstName',
+        'lastName',
+        'email'
+      ],
+      include: [
+        {
+          model: Opportunity,
+          as: 'assignedOpportunities',
+          attributes: [
+            [fn('COUNT', col('assignedOpportunities.id')), 'totalOpportunities'],
+            [fn('SUM', col('assignedOpportunities.value')), 'totalValue'],
+            [fn('AVG', col('assignedOpportunities.value')), 'avgDealSize']
+          ],
+          where: whereClause,
+          required: false
+        },
+        {
+          model: Contact,
+          as: 'assignedContacts',
+          attributes: [
+            [fn('COUNT', col('assignedContacts.id')), 'totalContacts']
+          ],
+          where: whereClause,
+          required: false
+        },
+        {
+          model: Activity,
+          as: 'assignedActivities',
+          attributes: [
+            [fn('COUNT', col('assignedActivities.id')), 'totalActivities'],
+            [fn('COUNT', literal('CASE WHEN assignedActivities.completed_at IS NOT NULL THEN 1 END')), 'completedActivities']
+          ],
+          where: whereClause,
+          required: false
+        }
+      ],
+      group: ['User.id'],
+      raw: false
+    });
+
+    // Won deals by user
+    const wonDeals = await User.findAll({
+      attributes: [
+        'id',
+        [fn('COUNT', col('assignedOpportunities.id')), 'wonDeals'],
+        [fn('SUM', col('assignedOpportunities.value')), 'wonValue']
+      ],
+      include: [{
+        model: Opportunity,
+        as: 'assignedOpportunities',
+        attributes: [],
+        where: {
+          ...whereClause,
+          actualCloseDate: { [Op.not]: null }
+        },
+        include: [{
+          model: PipelineStage,
+          as: 'stage',
+          where: { 
+            [Op.or]: [
+              { name: { [Op.iLike]: '%won%' } },
+              { name: { [Op.iLike]: '%closed%' } },
+              { probabilityPercent: 100 }
+            ]
+          },
+          required: true
+        }],
+        required: false
+      }],
+      group: ['User.id'],
+      raw: true
+    });
+
+    const wonDealsMap = {};
+    wonDeals.forEach(user => {
+      wonDealsMap[user.id] = {
+        wonDeals: parseInt(user.wonDeals) || 0,
+        wonValue: parseFloat(user.wonValue) || 0
+      };
+    });
+
+    return {
+      userPerformance: userStats.map(user => {
+        const opportunities = user.assignedOpportunities?.[0]?.dataValues || {};
+        const contacts = user.assignedContacts?.[0]?.dataValues || {};
+        const activities = user.assignedActivities?.[0]?.dataValues || {};
+        const won = wonDealsMap[user.id] || { wonDeals: 0, wonValue: 0 };
+
+        return {
+          userId: user.id,
+          name: `${user.firstName} ${user.lastName}`,
+          email: user.email,
+          metrics: {
+            totalOpportunities: parseInt(opportunities.totalOpportunities) || 0,
+            totalValue: parseFloat(opportunities.totalValue) || 0,
+            avgDealSize: parseFloat(opportunities.avgDealSize) || 0,
+            totalContacts: parseInt(contacts.totalContacts) || 0,
+            totalActivities: parseInt(activities.totalActivities) || 0,
+            completedActivities: parseInt(activities.completedActivities) || 0,
+            activityCompletionRate: activities.totalActivities > 0 
+              ? Math.round((activities.completedActivities / activities.totalActivities) * 100) 
+              : 0,
+            wonDeals: won.wonDeals,
+            wonValue: won.wonValue,
+            winRate: opportunities.totalOpportunities > 0 
+              ? Math.round((won.wonDeals / opportunities.totalOpportunities) * 100) 
+              : 0
+          }
+        };
+      })
+    };
+  }
+
+  /**
+   * Get pipeline forecasting data
+   */
+  async getPipelineForecast(req, res) {
+    try {
+      const {
+        period = 'quarter',
+        userId,
+        stageId
+      } = req.query;
+
+      // Calculate forecast period
+      const now = new Date();
+      let forecastEnd;
+      
+      switch (period) {
+        case 'month':
+          forecastEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+          break;
+        case 'quarter':
+          const currentQuarter = Math.floor(now.getMonth() / 3);
+          forecastEnd = new Date(now.getFullYear(), (currentQuarter + 1) * 3, 0);
+          break;
+        case 'year':
+          forecastEnd = new Date(now.getFullYear(), 11, 31);
+          break;
+        default:
+          forecastEnd = new Date(now.getFullYear(), now.getMonth() + 3, 0);
+      }
+
+      const whereClause = {
+        expectedCloseDate: {
+          [Op.between]: [now, forecastEnd]
+        }
+      };
+
+      if (userId) {
+        whereClause.assignedTo = userId;
+      }
+
+      if (stageId) {
+        whereClause.stageId = stageId;
+      }
+
+      // Get opportunities expected to close in forecast period
+      const forecastOpportunities = await Opportunity.findAll({
+        where: whereClause,
+        include: [
+          {
+            model: PipelineStage,
+            as: 'stage',
+            attributes: ['id', 'name', 'probabilityPercent']
+          },
+          {
+            model: Contact,
+            as: 'contact',
+            attributes: ['firstName', 'lastName']
+          },
+          {
+            model: User,
+            as: 'assignedUser',
+            attributes: ['firstName', 'lastName']
+          }
+        ],
+        order: [['expectedCloseDate', 'ASC']]
+      });
+
+      // Calculate weighted forecast
+      const forecast = {
+        totalOpportunities: forecastOpportunities.length,
+        totalValue: 0,
+        weightedValue: 0,
+        bestCase: 0,
+        worstCase: 0,
+        byStage: {},
+        byMonth: {}
+      };
+
+      forecastOpportunities.forEach(opp => {
+        const value = parseFloat(opp.value) || 0;
+        const probability = opp.stage?.probabilityPercent || 0;
+        const weightedValue = (value * probability) / 100;
+
+        forecast.totalValue += value;
+        forecast.weightedValue += weightedValue;
+        forecast.bestCase += probability >= 75 ? value : 0;
+        forecast.worstCase += probability >= 90 ? value : 0;
+
+        // Group by stage
+        const stageName = opp.stage?.name || 'Unknown';
+        if (!forecast.byStage[stageName]) {
+          forecast.byStage[stageName] = {
+            count: 0,
+            totalValue: 0,
+            weightedValue: 0,
+            probability: probability
+          };
+        }
+        forecast.byStage[stageName].count++;
+        forecast.byStage[stageName].totalValue += value;
+        forecast.byStage[stageName].weightedValue += weightedValue;
+
+        // Group by month
+        const month = opp.expectedCloseDate?.getMonth();
+        const year = opp.expectedCloseDate?.getFullYear();
+        const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
+        
+        if (!forecast.byMonth[monthKey]) {
+          forecast.byMonth[monthKey] = {
+            count: 0,
+            totalValue: 0,
+            weightedValue: 0
+          };
+        }
+        forecast.byMonth[monthKey].count++;
+        forecast.byMonth[monthKey].totalValue += value;
+        forecast.byMonth[monthKey].weightedValue += weightedValue;
+      });
+
+      res.json({
+        success: true,
+        data: {
+          period,
+          forecastPeriod: {
+            start: now.toISOString().split('T')[0],
+            end: forecastEnd.toISOString().split('T')[0]
+          },
+          forecast,
+          opportunities: forecastOpportunities.map(opp => ({
+            id: opp.id,
+            name: opp.name,
+            value: opp.value,
+            probability: opp.stage?.probabilityPercent,
+            expectedCloseDate: opp.expectedCloseDate,
+            contact: opp.contact ? `${opp.contact.firstName} ${opp.contact.lastName}` : null,
+            assignedUser: opp.assignedUser ? `${opp.assignedUser.firstName} ${opp.assignedUser.lastName}` : null,
+            stage: opp.stage?.name
+          }))
+        }
+      });
+    } catch (error) {
+      console.error('Pipeline forecast error:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'An error occurred while generating pipeline forecast'
+        }
+      });
+    }
   }
 }
 

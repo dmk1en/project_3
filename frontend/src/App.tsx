@@ -6,6 +6,7 @@ import Login from './pages/Login';
 import Contacts from './pages/Contacts';
 import Companies from './pages/Companies';
 import SocialMonitor from './pages/SocialMonitor';
+import PDLLeads from './pages/PDLLeads';
 import PrivateRoute from './components/PrivateRoute';
 import './App.css';
 
@@ -24,9 +25,13 @@ const menuItems = [
     key: '3',
     label: <Link to="/companies">Companies</Link>,
   },
+  // {
+  //   key: '4',
+  //   label: <Link to="/social">Social</Link>,
+  // },
   {
-    key: '4',
-    label: <Link to="/social">Social</Link>,
+    key: '5',
+    label: <Link to="/pdl-leads">PDL Leads</Link>,
   },
 ];
 
@@ -47,6 +52,7 @@ function App() {
           <Route path="/contacts" element={<PrivateRoute>{<Contacts />}</PrivateRoute>} />
           <Route path="/companies" element={<PrivateRoute>{<Companies />}</PrivateRoute>} />
           <Route path="/social" element={<PrivateRoute>{<SocialMonitor />}</PrivateRoute>} />
+          <Route path="/pdl-leads" element={<PrivateRoute>{<PDLLeads />}</PrivateRoute>} />
         </Routes>
       </Content>
     </Layout>

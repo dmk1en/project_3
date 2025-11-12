@@ -121,4 +121,27 @@ router.post('/reports/custom', [
   validate
 ], analyticsController.generateCustomReport);
 
+/**
+ * @route   GET /api/v1/analytics/pipeline-forecast
+ * @desc    Get pipeline forecasting data
+ * @access  Private (Sales Rep+)
+ */
+router.get('/pipeline-forecast', [
+  authenticate,
+  authorize('sales_rep', 'manager', 'admin'),
+  query('period')
+    .optional()
+    .isIn(['month', 'quarter', 'year'])
+    .withMessage('Invalid forecast period'),
+  query('userId')
+    .optional()
+    .isUUID()
+    .withMessage('User ID must be a valid UUID'),
+  query('stageId')
+    .optional()
+    .isUUID()
+    .withMessage('Stage ID must be a valid UUID'),
+  validate
+], analyticsController.getPipelineForecast);
+
 module.exports = router;

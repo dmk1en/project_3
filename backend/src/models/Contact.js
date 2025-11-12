@@ -65,7 +65,8 @@ const Contact = sequelize.define('Contact', {
       'website',
       'email_campaign',
       'cold_outreach',
-      'event'
+      'event',
+      'pdl_discovery'
     ),
     allowNull: false
   },

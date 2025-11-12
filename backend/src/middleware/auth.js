@@ -91,6 +91,62 @@ const authorize = (...roles) => {
 };
 
 /**
+ * Permission-based authorization middleware
+ */
+const requirePermission = (permission) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        error: {
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required'
+        }
+      });
+    }
+
+    // Define role-based permissions
+    const rolePermissions = {
+      admin: [
+        'admin', 'create_contacts', 'read_contacts', 'update_contacts', 'delete_contacts',
+        'create_companies', 'read_companies', 'update_companies', 'delete_companies',
+        'create_opportunities', 'read_opportunities', 'update_opportunities', 'delete_opportunities',
+        'read_leads', 'update_leads', 'pdl_search', 'manage_users'
+      ],
+      sales: [
+        'create_contacts', 'read_contacts', 'update_contacts',
+        'create_companies', 'read_companies', 'update_companies',
+        'create_opportunities', 'read_opportunities', 'update_opportunities',
+        'read_leads', 'update_leads', 'pdl_search'
+      ],
+      marketing: [
+        'read_contacts', 'update_contacts',
+        'read_companies', 'update_companies',
+        'read_opportunities', 'update_opportunities',
+        'read_leads', 'update_leads', 'pdl_search'
+      ],
+      viewer: [
+        'read_contacts', 'read_companies', 'read_opportunities', 'read_leads'
+      ]
+    };
+
+    const userPermissions = rolePermissions[req.user.role] || [];
+
+    if (!userPermissions.includes(permission)) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'FORBIDDEN',
+          message: `Permission '${permission}' required`
+        }
+      });
+    }
+
+    next();
+  };
+};
+
+/**
  * Optional authentication middleware
  */
 const optionalAuth = async (req, res, next) => {
@@ -118,5 +174,6 @@ const optionalAuth = async (req, res, next) => {
 module.exports = {
   authenticate,
   authorize,
+  requirePermission,
   optionalAuth
 };
