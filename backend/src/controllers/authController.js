@@ -25,18 +25,18 @@ class AuthController {
         });
       }
 
-      if (!user.isActive) {
+      if (user.status !== 'active') {
         return res.status(401).json({
           success: false,
           error: {
             code: 'ACCOUNT_INACTIVE',
-            message: 'Account is inactive'
+            message: 'Account is not active'
           }
         });
       }
 
       // Verify password
-      const isPasswordValid = await authService.comparePassword(password, user.passwordHash);
+      const isPasswordValid = await authService.comparePassword(password, user.password);
       if (!isPasswordValid) {
         return res.status(401).json({
           success: false,
@@ -75,7 +75,10 @@ class AuthController {
             email: user.email,
             firstName: user.firstName,
             lastName: user.lastName,
-            role: user.role
+            role: user.role,
+            status: user.status,
+            permissions: user.permissions || [],
+            isActive: user.status === 'active' // For backward compatibility
           },
           accessToken,
           refreshToken,
@@ -127,7 +130,7 @@ class AuthController {
         include: [{
           model: User,
           as: 'user',
-          attributes: { exclude: ['passwordHash'] }
+          attributes: { exclude: ['password'] }
         }]
       });
 
@@ -214,9 +217,26 @@ class AuthController {
    */
   async getProfile(req, res) {
     try {
-      const user = await User.findByPk(req.user.id, {
-        attributes: { exclude: ['passwordHash'] }
+      // Set no-cache headers to prevent 304 responses
+      res.set({
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
       });
+
+      const user = await User.findByPk(req.user.id, {
+        attributes: { exclude: ['password'] }
+      });
+
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: 'USER_NOT_FOUND',
+            message: 'User not found'
+          }
+        });
+      }
 
       res.json({
         success: true,
@@ -260,7 +280,7 @@ class AuthController {
       });
 
       const updatedUser = await User.findByPk(req.user.id, {
-        attributes: { exclude: ['passwordHash'] }
+        attributes: { exclude: ['password'] }
       });
 
       res.json({

@@ -27,22 +27,31 @@ export interface PotentialLead {
   industry: string;
   leadScore: number;
   leadType: 'staff' | 'client' | 'general';
-  status: 'pending_review' | 'reviewed' | 'converted' | 'rejected';
-  pdl_id: string;
-  raw_data: any;
+  status: 'pending_review' | 'reviewed' | 'converted' | 'rejected' | 'added_to_crm';
+  pdl_id?: string;
+  pdlProfileId?: string;
+  isManual?: boolean;
+  source?: string;
+  notes?: string;
+  raw_data?: any;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface SearchQuery {
   id: string;
-  query_name: string;
-  search_criteria: PDLSearchFilters;
-  results_count: number;
-  status: 'active' | 'paused' | 'completed';
-  last_run: string;
+  name: string;
+  description?: string;
+  queryConfig: any; // Contains the actual search criteria with jobTitles array
+  leadType: string;
+  runFrequency: string;
+  isActive: boolean;
+  results_count?: number;
+  status?: 'active' | 'paused' | 'completed';
+  lastRunAt?: string;
   createdAt: string;
   updatedAt: string;
+  createdBy: string;
 }
 
 export interface ConversionResult {
@@ -102,17 +111,8 @@ class PDLService {
     return response.data;
   }
 
-  // Update lead status or information
-  async updateLead(id: string, data: Partial<PotentialLead>) {
-    const response = await api.put(`/pdl/leads/${id}`, data);
-    return response.data;
-  }
-
-  // Delete a lead
-  async deleteLead(id: string) {
-    const response = await api.delete(`/pdl/leads/${id}`);
-    return response.data;
-  }
+  // Note: Individual lead updates/deletes not needed for PDL data retrieval
+  // Use bulk operations for lead management if needed
 
   // Perform a new lead search
   async searchLeads(filters: PDLSearchFilters) {
@@ -139,19 +139,37 @@ class PDLService {
   // Get all saved search queries
   async getSearchQueries() {
     try {
+      console.log('PDL Service: Making request to /pdl/queries');
       const response = await api.get('/pdl/queries');
+      console.log('PDL Service: Response received:', {
+        status: response.status,
+        statusText: response.statusText,
+        data: response.data,
+        headers: response.headers
+      });
       const data = response.data;
       
-      if (data && data.success) {
+      if (data && data.success && data.data && data.data.queries) {
+        console.log('PDL Service: Returning queries:', data.data.queries.length, 'items');
         return {
-          data: Array.isArray(data.data) ? data.data : []
+          data: Array.isArray(data.data.queries) ? data.data.queries : [],
+          pagination: data.data.pagination
         };
       }
       
-      return { data: [] };
-    } catch (error) {
-      console.error('Error fetching search queries:', error);
-      return { data: [] };
+      console.log('PDL Service: No queries found or invalid response structure');
+      return { data: [], pagination: null };
+    } catch (error: any) {
+      console.error('PDL Service: Error fetching search queries:', {
+        message: error?.message,
+        status: error?.response?.status,
+        statusText: error?.response?.statusText,
+        data: error?.response?.data,
+        url: error?.config?.url,
+        method: error?.config?.method,
+        headers: error?.config?.headers
+      });
+      return { data: [], pagination: null };
     }
   }
 
@@ -159,26 +177,58 @@ class PDLService {
   async createSearchQuery(queryData: {
     query_name: string;
     search_criteria: PDLSearchFilters;
+    description?: string;
   }) {
-    const response = await api.post('/pdl/queries', queryData);
+    console.log('PDL Service: Received queryData:', JSON.stringify(queryData, null, 2));
+    
+    // Transform frontend field names to backend expected names
+    const queryConfig: any = { ...queryData.search_criteria };
+    console.log('PDL Service: Initial queryConfig:', JSON.stringify(queryConfig, null, 2));
+    
+    // Transform job_title (string) to jobTitles (array) as expected by backend
+    if (queryConfig.job_title && typeof queryConfig.job_title === 'string') {
+      console.log('PDL Service: Found job_title, transforming to jobTitles array');
+      // Split by comma or use as single item array
+      queryConfig.jobTitles = queryConfig.job_title.includes(',') 
+        ? queryConfig.job_title.split(',').map((title: string) => title.trim())
+        : [queryConfig.job_title.trim()];
+      
+      console.log('PDL Service: Created jobTitles:', queryConfig.jobTitles);
+      
+      // Remove the original field
+      delete queryConfig.job_title;
+    } else {
+      console.log('PDL Service: No job_title found or invalid type:', {
+        hasJobTitle: !!queryConfig.job_title,
+        type: typeof queryConfig.job_title,
+        value: queryConfig.job_title
+      });
+    }
+    
+    const backendData = {
+      name: queryData.query_name,
+      queryConfig: queryConfig,
+      description: queryData.description || `Search query: ${queryData.query_name}`,
+      leadType: 'general',
+      runFrequency: 'weekly'
+    };
+    
+    console.log('PDL Service: Final backend data:', JSON.stringify(backendData, null, 2));
+    const response = await api.post('/pdl/queries', backendData);
     return response.data;
   }
 
-  // Update a search query
-  async updateSearchQuery(id: string, queryData: Partial<SearchQuery>) {
-    const response = await api.put(`/pdl/queries/${id}`, queryData);
-    return response.data;
-  }
-
-  // Delete a search query
-  async deleteSearchQuery(id: string) {
-    const response = await api.delete(`/pdl/queries/${id}`);
-    return response.data;
-  }
+  // Note: Query updates/deletes not implemented - queries are for retrieval only
 
   // Execute a saved search query
   async executeSearchQuery(id: string) {
-    const response = await api.post(`/pdl/queries/${id}/execute`);
+    const response = await api.post(`/pdl/queries/${id}/run`);
+    return response.data;
+  }
+
+  // Delete a saved search query  
+  async deleteSearchQuery(id: string) {
+    const response = await api.delete(`/pdl/queries/${id}`);
     return response.data;
   }
 
@@ -215,25 +265,54 @@ class PDLService {
     return response.data;
   }
 
-  // Enrich lead data
-  async enrichLead(id: string) {
-    const response = await api.post(`/pdl/leads/${id}/enrich`);
+  // Get PDL API usage statistics
+  async getAPIUsage() {
+    const response = await api.get('/pdl/usage');
     return response.data;
   }
 
-  // Export leads to CSV
-  async exportLeads(params?: {
-    status?: string;
-    lead_type?: string;
-    date_from?: string;
-    date_to?: string;
-  }) {
-    const response = await api.get('/pdl/export', {
-      params,
-      responseType: 'blob',
+  // Enrich a lead with PDL data (including PDL-sourced leads with forceEnrich)
+  async enrichLead(leadId: string, forceEnrich: boolean = false) {
+    const response = await api.post(`/pdl/leads/${leadId}/enrich`, { 
+      forceEnrich 
     });
     return response.data;
   }
+
+  // Create a manual lead
+  async createManualLead(leadData: {
+    fullName: string;
+    jobTitle?: string;
+    companyName?: string;
+    email?: string;
+    phone?: string;
+    linkedinUrl?: string;
+    twitterUrl?: string;
+    locationCity?: string;
+    locationCountry?: string;
+    industry?: string;
+    leadType?: string;
+    skills?: string[];
+    notes?: string;
+  }) {
+    const response = await api.post('/pdl/leads/manual', leadData);
+    return response.data;
+  }
+
+  // Update lead information
+  async updateLead(leadId: string, updateData: any) {
+    const response = await api.put(`/pdl/leads/${leadId}`, updateData);
+    return response.data;
+  }
+
+  // Delete a lead
+  async deleteLead(leadId: string) {
+    const response = await api.delete(`/pdl/leads/${leadId}`);
+    return response.data;
+  }
+
+  // Note: Lead export features not implemented in backend
+  // Focus on core data retrieval functionality
 }
 
 export const pdlService = new PDLService();

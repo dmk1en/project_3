@@ -7,6 +7,7 @@ const {
   PipelineStage 
 } = require('../models');
 const { Op, fn, col, literal } = require('sequelize');
+const { sequelize } = require('../config/db');
 const moment = require('moment');
 
 class AnalyticsController {
@@ -159,38 +160,76 @@ class AnalyticsController {
       // Top performers (if not filtering by specific user)
       let topPerformers = [];
       if (!userId) {
-        const performanceData = await User.findAll({
-          attributes: [
-            'id',
-            'firstName',
-            'lastName',
-            [fn('COUNT', col('assignedOpportunities.id')), 'totalDeals'],
-            [fn('SUM', col('assignedOpportunities.value')), 'totalRevenue']
-          ],
-          include: [{
-            model: Opportunity,
-            as: 'assignedOpportunities',
-            attributes: [],
-            where: dateRange,
-            required: false,
-            include: [{
-              model: PipelineStage,
-              as: 'stage',
-              where: { name: { [Op.iLike]: '%won%' } },
-              required: false
-            }]
-          }],
-          group: ['User.id'],
-          order: [[literal('totalRevenue'), 'DESC']],
-          limit: 5,
-          raw: false
+        // Extract actual date values for the query
+        let queryStartDate, queryEndDate;
+        
+        if (startDate && endDate) {
+          queryStartDate = new Date(startDate);
+          queryEndDate = new Date(endDate);
+        } else {
+          // Use the same logic as dateRange calculation
+          const now = moment();
+          let start;
+          
+          switch (period) {
+            case 'today':
+              start = now.clone().startOf('day');
+              break;
+            case 'week':
+              start = now.clone().startOf('week');
+              break;
+            case 'month':
+              start = now.clone().startOf('month');
+              break;
+            case 'quarter':
+              start = now.clone().startOf('quarter');
+              break;
+            case 'year':
+              start = now.clone().startOf('year');
+              break;
+            default:
+              start = now.clone().startOf('month');
+          }
+          
+          queryStartDate = start.toDate();
+          queryEndDate = now.toDate();
+        }
+
+        // Use raw SQL query to avoid Sequelize complexity issues
+        const performanceQuery = `
+          SELECT 
+            u.id as "userId",
+            u.first_name as "firstName", 
+            u.last_name as "lastName",
+            COUNT(o.id) as "totalDeals",
+            COALESCE(SUM(o.value), 0) as "totalRevenue"
+          FROM users u
+          LEFT JOIN opportunities o ON u.id = o.assigned_user_id 
+            AND o.deleted_at IS NULL 
+            AND o.created_at >= :startDate
+            AND o.created_at <= :endDate
+          LEFT JOIN pipeline_stages ps ON o.pipeline_stage_id = ps.id 
+            AND ps.deleted_at IS NULL 
+            AND ps.name ILIKE '%won%'
+          WHERE u.deleted_at IS NULL
+          GROUP BY u.id, u.first_name, u.last_name
+          ORDER BY "totalRevenue" DESC
+          LIMIT 5
+        `;
+
+        const performanceData = await sequelize.query(performanceQuery, {
+          replacements: { 
+            startDate: queryStartDate.toISOString(),
+            endDate: queryEndDate.toISOString()
+          },
+          type: sequelize.QueryTypes.SELECT
         });
 
         topPerformers = performanceData.map(user => ({
-          userId: user.id,
+          userId: user.userId,
           name: `${user.firstName} ${user.lastName}`,
-          totalDeals: parseInt(user.dataValues.totalDeals) || 0,
-          totalRevenue: parseFloat(user.dataValues.totalRevenue) || 0
+          totalDeals: parseInt(user.totalDeals) || 0,
+          totalRevenue: parseFloat(user.totalRevenue) || 0
         }));
       }
 
@@ -408,7 +447,7 @@ class AnalyticsController {
         ],
         where: dateFilter,
         group: ['source'],
-        order: [[literal('totalLeads'), 'DESC']],
+        order: [[literal('"totalLeads"'), 'DESC']],
         raw: true
       });
 
@@ -457,25 +496,172 @@ class AnalyticsController {
         metrics
       } = req.body;
 
-      // This is a basic implementation - can be extended for more complex reports
+      // Build date range filter
+      const whereClause = {};
+      if (dateRange?.start && dateRange?.end) {
+        whereClause.createdAt = {
+          [Op.between]: [new Date(dateRange.start), new Date(dateRange.end)]
+        };
+      }
+
       let data = {};
 
       switch (reportType) {
         case 'activity_summary':
-          data = await this.getActivitySummary(dateRange, filters);
+          // Get activity summary data
+          const activities = await Activity.findAll({
+            attributes: [
+              'type',
+              [fn('COUNT', col('id')), 'count'],
+              [fn('COUNT', literal('CASE WHEN is_completed = true THEN 1 END')), 'completed']
+            ],
+            where: whereClause,
+            group: ['type'],
+            raw: true
+          });
+
+          data.activities = activities.map(a => ({
+            type: a.type,
+            count: parseInt(a.count),
+            completed: parseInt(a.completed),
+            completionRate: a.count > 0 ? Math.round((a.completed / a.count) * 100) : 0
+          }));
+
+          data.summary = {
+            totalActivities: activities.reduce((sum, a) => sum + parseInt(a.count), 0),
+            completedActivities: activities.reduce((sum, a) => sum + parseInt(a.completed), 0),
+            overallCompletionRate: 0
+          };
+
+          if (data.summary.totalActivities > 0) {
+            data.summary.overallCompletionRate = Math.round(
+              (data.summary.completedActivities / data.summary.totalActivities) * 100
+            );
+          }
           break;
+
         case 'pipeline_analysis':
-          data = await this.getPipelineAnalysis(dateRange, filters);
+          // Get pipeline velocity and stage analysis
+          const pipelineStages = await PipelineStage.findAll({
+            attributes: [
+              'id',
+              'name',
+              'displayOrder',
+              'probabilityPercent',
+              [fn('COUNT', col('opportunities.id')), 'opportunityCount'],
+              [fn('AVG', col('opportunities.value')), 'avgValue'],
+              [fn('SUM', col('opportunities.value')), 'totalValue']
+            ],
+            include: [{
+              model: Opportunity,
+              as: 'opportunities',
+              attributes: [],
+              where: whereClause,
+              required: false
+            }],
+            group: ['PipelineStage.id'],
+            order: [['displayOrder', 'ASC']],
+            raw: true
+          });
+
+          data.pipelineAnalysis = pipelineStages.map(stage => ({
+            stageId: stage.id,
+            name: stage.name,
+            displayOrder: stage.displayOrder,
+            probabilityPercent: stage.probabilityPercent,
+            opportunityCount: parseInt(stage.opportunityCount) || 0,
+            avgValue: parseFloat(stage.avgValue) || 0,
+            totalValue: parseFloat(stage.totalValue) || 0
+          }));
+
+          // Stage movements (activity-based transitions)
+          const stageMovements = await Activity.findAll({
+            attributes: [
+              'subject',
+              [fn('COUNT', col('Activity.id')), 'movements']
+            ],
+            where: {
+              type: ['note', 'meeting', 'call'],
+              subject: { [Op.iLike]: '%stage%' },
+              ...whereClause
+            },
+            group: ['subject'],
+            raw: true
+          });
+
+          data.stageMovements = stageMovements.map(movement => ({
+            transition: movement.subject,
+            count: parseInt(movement.movements)
+          }));
           break;
+
         case 'user_performance':
-          data = await this.getUserPerformance(dateRange, filters);
+          // Get user performance metrics using raw SQL for better reliability
+          const userPerformanceQuery = `
+            SELECT 
+              u.id as "userId",
+              u.first_name as "firstName",
+              u.last_name as "lastName", 
+              u.email,
+              COUNT(DISTINCT o.id) as "totalOpportunities",
+              COALESCE(SUM(o.value), 0) as "totalValue",
+              COALESCE(AVG(o.value), 0) as "avgDealSize",
+              COUNT(DISTINCT c.id) as "totalContacts",
+              COUNT(DISTINCT a.id) as "totalActivities",
+              COUNT(DISTINCT CASE WHEN a.is_completed = true THEN a.id END) as "completedActivities",
+              COUNT(DISTINCT CASE WHEN ps.name ILIKE '%won%' OR ps.name ILIKE '%closed%' OR ps.probability_percent = 100 THEN o.id END) as "wonDeals"
+            FROM users u
+            LEFT JOIN opportunities o ON u.id = o.assigned_user_id 
+              AND o.deleted_at IS NULL 
+              ${dateRange?.start ? `AND o.created_at >= '${dateRange.start}'` : ''}
+              ${dateRange?.end ? `AND o.created_at <= '${dateRange.end}'` : ''}
+            LEFT JOIN contacts c ON u.id = c.assigned_to 
+              AND c.deleted_at IS NULL
+              ${dateRange?.start ? `AND c.created_at >= '${dateRange.start}'` : ''}
+              ${dateRange?.end ? `AND c.created_at <= '${dateRange.end}'` : ''}
+            LEFT JOIN activities a ON u.id = a.user_id 
+              AND a.deleted_at IS NULL
+              ${dateRange?.start ? `AND a.created_at >= '${dateRange.start}'` : ''}
+              ${dateRange?.end ? `AND a.created_at <= '${dateRange.end}'` : ''}
+            LEFT JOIN pipeline_stages ps ON o.pipeline_stage_id = ps.id 
+              AND ps.deleted_at IS NULL
+            WHERE u.deleted_at IS NULL
+            GROUP BY u.id, u.first_name, u.last_name, u.email
+            ORDER BY "totalValue" DESC
+          `;
+
+          const userPerformanceResults = await sequelize.query(userPerformanceQuery, {
+            type: sequelize.QueryTypes.SELECT
+          });
+
+          data.userPerformance = userPerformanceResults.map(user => ({
+            userId: user.userId,
+            name: `${user.firstName} ${user.lastName}`,
+            email: user.email,
+            metrics: {
+              totalOpportunities: parseInt(user.totalOpportunities) || 0,
+              totalValue: parseFloat(user.totalValue) || 0,
+              avgDealSize: parseFloat(user.avgDealSize) || 0,
+              totalContacts: parseInt(user.totalContacts) || 0,
+              totalActivities: parseInt(user.totalActivities) || 0,
+              completedActivities: parseInt(user.completedActivities) || 0,
+              activityCompletionRate: user.totalActivities > 0 
+                ? Math.round((user.completedActivities / user.totalActivities) * 100) 
+                : 0,
+              wonDeals: parseInt(user.wonDeals) || 0,
+              winRate: user.totalOpportunities > 0 
+                ? Math.round((user.wonDeals / user.totalOpportunities) * 100) 
+                : 0
+            }
+          }));
           break;
+
         default:
           return res.status(400).json({
             success: false,
             error: {
               code: 'INVALID_REPORT_TYPE',
-              message: 'Invalid report type specified'
+              message: 'Invalid report type specified. Valid types: activity_summary, pipeline_analysis, user_performance'
             }
           });
       }
@@ -485,6 +671,7 @@ class AnalyticsController {
         data: {
           reportType,
           generatedAt: new Date().toISOString(),
+          dateRange: dateRange || { start: null, end: null },
           ...data
         }
       });
@@ -494,249 +681,11 @@ class AnalyticsController {
         success: false,
         error: {
           code: 'INTERNAL_ERROR',
-          message: 'An error occurred while generating custom report'
+          message: 'An error occurred while generating custom report',
+          details: error.message
         }
       });
     }
-  }
-
-  async getActivitySummary(dateRange, filters) {
-    const whereClause = {};
-    if (dateRange?.start && dateRange?.end) {
-      whereClause.createdAt = {
-        [Op.between]: [new Date(dateRange.start), new Date(dateRange.end)]
-      };
-    }
-
-    const activities = await Activity.findAll({
-      attributes: [
-        'type',
-        [fn('COUNT', col('id')), 'count'],
-        [fn('COUNT', literal('CASE WHEN completed_at IS NOT NULL THEN 1 END')), 'completed']
-      ],
-      where: whereClause,
-      group: ['type'],
-      raw: true
-    });
-
-    return {
-      activities: activities.map(a => ({
-        type: a.type,
-        count: parseInt(a.count),
-        completed: parseInt(a.completed),
-        completionRate: a.count > 0 ? Math.round((a.completed / a.count) * 100) : 0
-      }))
-    };
-  }
-
-  async getPipelineAnalysis(dateRange, filters) {
-    const whereClause = {};
-    if (dateRange?.start && dateRange?.end) {
-      whereClause.createdAt = {
-        [Op.between]: [new Date(dateRange.start), new Date(dateRange.end)]
-      };
-    }
-
-    // Pipeline velocity - average time opportunities spend in each stage
-    const pipelineVelocity = await PipelineStage.findAll({
-      attributes: [
-        'id',
-        'name',
-        'displayOrder',
-        'probabilityPercent'
-      ],
-      include: [{
-        model: Opportunity,
-        as: 'opportunities',
-        attributes: [],
-        where: whereClause,
-        required: false
-      }],
-      order: [['displayOrder', 'ASC']]
-    });
-
-    // Stage conversion rates - opportunities moving between stages
-    const stageMovements = await Activity.findAll({
-      attributes: [
-        'subject',
-        [fn('COUNT', col('Activity.id')), 'movements']
-      ],
-      where: {
-        type: 'stage_change',
-        ...whereClause
-      },
-      group: ['subject'],
-      raw: true
-    });
-
-    // Deal size analysis by stage
-    const dealSizeByStage = await PipelineStage.findAll({
-      attributes: [
-        'id',
-        'name',
-        [fn('COUNT', col('opportunities.id')), 'count'],
-        [fn('AVG', col('opportunities.value')), 'avgValue'],
-        [fn('SUM', col('opportunities.value')), 'totalValue'],
-        [fn('MIN', col('opportunities.value')), 'minValue'],
-        [fn('MAX', col('opportunities.value')), 'maxValue']
-      ],
-      include: [{
-        model: Opportunity,
-        as: 'opportunities',
-        attributes: [],
-        where: whereClause,
-        required: false
-      }],
-      group: ['PipelineStage.id'],
-      raw: false
-    });
-
-    return {
-      pipelineVelocity: pipelineVelocity.map(stage => ({
-        stageId: stage.id,
-        name: stage.name,
-        displayOrder: stage.displayOrder,
-        probabilityPercent: stage.probabilityPercent
-      })),
-      stageMovements: stageMovements.map(movement => ({
-        transition: movement.subject,
-        count: parseInt(movement.movements)
-      })),
-      dealSizeAnalysis: dealSizeByStage.map(stage => ({
-        stageId: stage.id,
-        name: stage.name,
-        count: parseInt(stage.dataValues.count) || 0,
-        avgValue: parseFloat(stage.dataValues.avgValue) || 0,
-        totalValue: parseFloat(stage.dataValues.totalValue) || 0,
-        minValue: parseFloat(stage.dataValues.minValue) || 0,
-        maxValue: parseFloat(stage.dataValues.maxValue) || 0
-      }))
-    };
-  }
-
-  async getUserPerformance(dateRange, filters) {
-    const whereClause = {};
-    if (dateRange?.start && dateRange?.end) {
-      whereClause.createdAt = {
-        [Op.between]: [new Date(dateRange.start), new Date(dateRange.end)]
-      };
-    }
-
-    // User performance metrics
-    const userStats = await User.findAll({
-      attributes: [
-        'id',
-        'firstName',
-        'lastName',
-        'email'
-      ],
-      include: [
-        {
-          model: Opportunity,
-          as: 'assignedOpportunities',
-          attributes: [
-            [fn('COUNT', col('assignedOpportunities.id')), 'totalOpportunities'],
-            [fn('SUM', col('assignedOpportunities.value')), 'totalValue'],
-            [fn('AVG', col('assignedOpportunities.value')), 'avgDealSize']
-          ],
-          where: whereClause,
-          required: false
-        },
-        {
-          model: Contact,
-          as: 'assignedContacts',
-          attributes: [
-            [fn('COUNT', col('assignedContacts.id')), 'totalContacts']
-          ],
-          where: whereClause,
-          required: false
-        },
-        {
-          model: Activity,
-          as: 'assignedActivities',
-          attributes: [
-            [fn('COUNT', col('assignedActivities.id')), 'totalActivities'],
-            [fn('COUNT', literal('CASE WHEN assignedActivities.completed_at IS NOT NULL THEN 1 END')), 'completedActivities']
-          ],
-          where: whereClause,
-          required: false
-        }
-      ],
-      group: ['User.id'],
-      raw: false
-    });
-
-    // Won deals by user
-    const wonDeals = await User.findAll({
-      attributes: [
-        'id',
-        [fn('COUNT', col('assignedOpportunities.id')), 'wonDeals'],
-        [fn('SUM', col('assignedOpportunities.value')), 'wonValue']
-      ],
-      include: [{
-        model: Opportunity,
-        as: 'assignedOpportunities',
-        attributes: [],
-        where: {
-          ...whereClause,
-          actualCloseDate: { [Op.not]: null }
-        },
-        include: [{
-          model: PipelineStage,
-          as: 'stage',
-          where: { 
-            [Op.or]: [
-              { name: { [Op.iLike]: '%won%' } },
-              { name: { [Op.iLike]: '%closed%' } },
-              { probabilityPercent: 100 }
-            ]
-          },
-          required: true
-        }],
-        required: false
-      }],
-      group: ['User.id'],
-      raw: true
-    });
-
-    const wonDealsMap = {};
-    wonDeals.forEach(user => {
-      wonDealsMap[user.id] = {
-        wonDeals: parseInt(user.wonDeals) || 0,
-        wonValue: parseFloat(user.wonValue) || 0
-      };
-    });
-
-    return {
-      userPerformance: userStats.map(user => {
-        const opportunities = user.assignedOpportunities?.[0]?.dataValues || {};
-        const contacts = user.assignedContacts?.[0]?.dataValues || {};
-        const activities = user.assignedActivities?.[0]?.dataValues || {};
-        const won = wonDealsMap[user.id] || { wonDeals: 0, wonValue: 0 };
-
-        return {
-          userId: user.id,
-          name: `${user.firstName} ${user.lastName}`,
-          email: user.email,
-          metrics: {
-            totalOpportunities: parseInt(opportunities.totalOpportunities) || 0,
-            totalValue: parseFloat(opportunities.totalValue) || 0,
-            avgDealSize: parseFloat(opportunities.avgDealSize) || 0,
-            totalContacts: parseInt(contacts.totalContacts) || 0,
-            totalActivities: parseInt(activities.totalActivities) || 0,
-            completedActivities: parseInt(activities.completedActivities) || 0,
-            activityCompletionRate: activities.totalActivities > 0 
-              ? Math.round((activities.completedActivities / activities.totalActivities) * 100) 
-              : 0,
-            wonDeals: won.wonDeals,
-            wonValue: won.wonValue,
-            winRate: opportunities.totalOpportunities > 0 
-              ? Math.round((won.wonDeals / opportunities.totalOpportunities) * 100) 
-              : 0
-          }
-        };
-      })
-    };
   }
 
   /**

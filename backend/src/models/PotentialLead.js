@@ -32,8 +32,15 @@ const PotentialLead = sequelize.define('PotentialLead', {
     type: DataTypes.STRING(100),
     field: 'location_city'
   },
+  location: {
+    type: DataTypes.STRING(255)
+  },
   industry: {
     type: DataTypes.STRING(100)
+  },
+  skills: {
+    type: DataTypes.JSONB,
+    defaultValue: []
   },
   linkedinUrl: {
     type: DataTypes.STRING(500),
@@ -69,6 +76,7 @@ const PotentialLead = sequelize.define('PotentialLead', {
   },
   retrievedAt: {
     type: DataTypes.DATE,
+    allowNull: true,
     field: 'retrieved_at'
   },
   reviewedBy: {
@@ -78,6 +86,25 @@ const PotentialLead = sequelize.define('PotentialLead', {
   reviewedAt: {
     type: DataTypes.DATE,
     field: 'reviewed_at'
+  },
+  isManual: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+    field: 'is_manual'
+  },
+  source: {
+    type: DataTypes.STRING
+  },
+  notes: {
+    type: DataTypes.TEXT
+  },
+  createdBy: {
+    type: DataTypes.UUID,
+    field: 'created_by'
+  },
+  updatedBy: {
+    type: DataTypes.UUID,
+    field: 'updated_by'
   }
 }, {
   tableName: 'potential_leads',

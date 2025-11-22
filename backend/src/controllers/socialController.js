@@ -26,7 +26,7 @@ class SocialController {
             attributes: ['id', 'firstName', 'lastName', 'email']
           }
         ],
-        order: [['lastUpdated', 'DESC']]
+        order: [['updatedAt', 'DESC']]
       });
 
       res.json({
@@ -74,11 +74,9 @@ class SocialController {
           profileUrl,
           username,
           profileData,
-          followersCount,
-          followingCount,
-          postCount,
-          engagementRate,
-          lastUpdated: new Date()
+          followerCount,
+          connectionStatus,
+          lastActivityDate: new Date()
         });
         profile = existingProfile;
       } else {
@@ -364,12 +362,10 @@ class SocialController {
       }
 
       await profile.update({
-        followersCount: followersCount !== undefined ? followersCount : profile.followersCount,
-        followingCount: followingCount !== undefined ? followingCount : profile.followingCount,
-        postCount: postCount !== undefined ? postCount : profile.postCount,
-        engagementRate: engagementRate !== undefined ? engagementRate : profile.engagementRate,
+        followerCount: followersCount !== undefined ? followersCount : profile.followerCount,
+        connectionStatus: connectionStatus !== undefined ? connectionStatus : profile.connectionStatus,
         profileData: profileData ? { ...profile.profileData, ...profileData } : profile.profileData,
-        lastUpdated: new Date()
+        lastActivityDate: new Date()
       });
 
       res.json({

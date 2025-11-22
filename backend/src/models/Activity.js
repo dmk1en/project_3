@@ -35,6 +35,14 @@ const Activity = sequelize.define('Activity', {
       key: 'id'
     }
   },
+  companyId: {
+    type: DataTypes.UUID,
+    field: 'company_id',
+    references: {
+      model: 'companies',
+      key: 'id'
+    }
+  },
   opportunityId: {
     type: DataTypes.UUID,
     field: 'opportunity_id',
@@ -45,48 +53,59 @@ const Activity = sequelize.define('Activity', {
   },
   assignedTo: {
     type: DataTypes.UUID,
-    field: 'assigned_to',
+    field: 'user_id',
     references: {
       model: 'users',
       key: 'id'
     }
   },
-  dueDate: {
+  activityDate: {
     type: DataTypes.DATE,
-    field: 'due_date'
+    field: 'activity_date',
+    allowNull: false
   },
-  completedAt: {
+  durationMinutes: {
+    type: DataTypes.INTEGER,
+    field: 'duration_minutes'
+  },
+  isCompleted: {
+    type: DataTypes.BOOLEAN,
+    field: 'is_completed',
+    defaultValue: false
+  },
+  followUpDate: {
     type: DataTypes.DATE,
-    field: 'completed_at'
-  },
-  priority: {
-    type: DataTypes.ENUM('low', 'medium', 'high', 'urgent'),
-    defaultValue: 'medium'
+    field: 'follow_up_date'
   },
   outcome: {
-    type: DataTypes.TEXT
+    type: DataTypes.STRING(200)
   },
-  customFields: {
-    type: DataTypes.JSONB,
-    field: 'custom_fields'
+  metadata: {
+    type: DataTypes.JSONB
   }
 }, {
   tableName: 'activities',
   indexes: [
     {
+      fields: ['user_id']
+    },
+    {
       fields: ['contact_id']
     },
     {
-      fields: ['due_date']
+      fields: ['company_id']
     },
     {
-      fields: ['assigned_to']
+      fields: ['opportunity_id']
     },
     {
       fields: ['type']
     },
     {
-      fields: ['opportunity_id']
+      fields: ['activity_date']
+    },
+    {
+      fields: ['is_completed']
     }
   ]
 });

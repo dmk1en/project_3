@@ -36,39 +36,40 @@ const SocialProfile = sequelize.define('SocialProfile', {
     type: DataTypes.JSONB,
     field: 'profile_data'
   },
-  followersCount: {
+  followerCount: {
     type: DataTypes.INTEGER,
-    field: 'followers_count'
+    field: 'follower_count',
+    defaultValue: 0
   },
-  followingCount: {
-    type: DataTypes.INTEGER,
-    field: 'following_count'
+  connectionStatus: {
+    type: DataTypes.ENUM('none', 'pending', 'connected', 'following'),
+    field: 'connection_status',
+    defaultValue: 'none'
   },
-  postCount: {
-    type: DataTypes.INTEGER,
-    field: 'post_count'
-  },
-  engagementRate: {
-    type: DataTypes.DECIMAL(5, 2),
-    field: 'engagement_rate'
-  },
-  lastUpdated: {
+  lastActivityDate: {
     type: DataTypes.DATE,
-    field: 'last_updated',
-    defaultValue: DataTypes.NOW
+    field: 'last_activity_date'
+  },
+  isVerified: {
+    type: DataTypes.BOOLEAN,
+    field: 'is_verified',
+    defaultValue: false
   }
 }, {
   tableName: 'social_profiles',
   indexes: [
     {
-      unique: true,
-      fields: ['contact_id', 'platform']
+      fields: ['contact_id']
     },
     {
       fields: ['platform']
     },
     {
-      fields: ['username']
+      fields: ['connection_status']
+    },
+    {
+      unique: true,
+      fields: ['profile_url']
     }
   ]
 });

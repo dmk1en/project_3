@@ -13,19 +13,22 @@ import {
   message,
   Collapse,
   Tooltip,
-  Badge
+  Badge,
+  Popconfirm
 } from 'antd';
 import {
   SearchOutlined,
   SaveOutlined,
   ClearOutlined,
   FilterOutlined,
-  HistoryOutlined
+  HistoryOutlined,
+  DeleteOutlined
 } from '@ant-design/icons';
 import { useDispatch, useSelector } from 'react-redux';
 import { RootState } from '../../store';
-import { searchLeads, setSearchFilters, clearSearchFilters, fetchSearchQueries, createSearchQuery, executeSearchQuery } from '../../features/pdl/pdlSlice';
+import { searchLeads, setSearchFilters, clearSearchFilters, fetchSearchQueries, createSearchQuery, executeSearchQuery, deleteSearchQuery } from '../../features/pdl/pdlSlice';
 import { PDLSearchFilters } from '../../services/pdlService';
+import { getDetailedErrorMessage } from '../../utils/errorUtils';
 
 const { Panel } = Collapse;
 const { Option } = Select;
@@ -49,7 +52,11 @@ const LeadSearch: React.FC<LeadSearchProps> = ({ onSearchComplete }) => {
   } = useSelector((state: RootState) => state.pdl);
 
   useEffect(() => {
-    dispatch(fetchSearchQueries() as any);
+    // Only fetch search queries if user has access
+    dispatch(fetchSearchQueries() as any).catch((error: any) => {
+      console.warn('Failed to fetch search queries:', error);
+      // Don't show error message for missing queries - it's not critical
+    });
   }, [dispatch]);
 
   // Industry options
@@ -84,8 +91,10 @@ const LeadSearch: React.FC<LeadSearchProps> = ({ onSearchComplete }) => {
       const result = await dispatch(searchLeads(filters) as any).unwrap();
       message.success(`Found ${result.results_count} potential leads`);
       onSearchComplete?.(result.results_count);
-    } catch (error) {
-      message.error('Search failed. Please try again.');
+    } catch (error: any) {
+      console.error('LeadSearch: Search error:', error);
+      const errorMessage = getDetailedErrorMessage(error, 'Search failed. Please try again.');
+      message.error(errorMessage);
     }
   };
 
@@ -96,33 +105,69 @@ const LeadSearch: React.FC<LeadSearchProps> = ({ onSearchComplete }) => {
     }
 
     try {
+      // Get current form values instead of using searchFilters state
+      const currentFormValues = form.getFieldsValue();
+      console.log('LeadSearch: Current form values:', currentFormValues);
+      
+      // Validate that we have a job title
+      if (!currentFormValues.job_title || !currentFormValues.job_title.trim()) {
+        message.error('Please enter a job title before saving the query');
+        return;
+      }
+
       await dispatch(createSearchQuery({
         query_name: queryName,
-        search_criteria: searchFilters
+        search_criteria: currentFormValues,  // Use current form values
+        description: `Search for ${currentFormValues.job_title} leads`
       }) as any).unwrap();
       
       message.success('Search query saved successfully');
       setQueryName('');
       setSaveQueryVisible(false);
-    } catch (error) {
-      message.error('Failed to save search query');
+      
+      // Refresh saved queries list
+      dispatch(fetchSearchQueries() as any);
+    } catch (error: any) {
+      console.error('LeadSearch: Save query error:', error);
+      const errorMessage = getDetailedErrorMessage(error, 'Failed to save search query');
+      message.error(errorMessage);
     }
   };
 
-  const handleExecuteSavedQuery = async (queryId: string) => {
+  const handleLoadSavedQuery = (queryId: string) => {
     try {
-      const result = await dispatch(executeSearchQuery(queryId) as any).unwrap();
-      message.success(`Executed saved query: ${result.results_count} leads found`);
-      onSearchComplete?.(result.results_count);
-      
-      // Load the query filters into the form
+      // Load the query filters into the form without executing
       const query = searchQueries.find(q => q.id === queryId);
       if (query) {
-        form.setFieldsValue(query.search_criteria);
-        dispatch(setSearchFilters(query.search_criteria) as any);
+        // Transform backend queryConfig to frontend form format
+        const formValues = { ...query.queryConfig };
+        
+        // Transform jobTitles array back to job_title string for the form
+        if (formValues.jobTitles && Array.isArray(formValues.jobTitles)) {
+          formValues.job_title = formValues.jobTitles.join(', ');
+          delete formValues.jobTitles;
+        }
+        
+        console.log('LeadSearch: Loading saved query form values:', formValues);
+        form.setFieldsValue(formValues);
+        dispatch(setSearchFilters(formValues) as any);
+        message.success(`Loaded query "${query.name}" into form`);
       }
-    } catch (error) {
-      message.error('Failed to execute saved query');
+    } catch (error: any) {
+      console.error('LeadSearch: Load query error:', error);
+      const errorMessage = getDetailedErrorMessage(error, 'Failed to load saved query');
+      message.error(errorMessage);
+    }
+  };
+
+  const handleDeleteQuery = async (queryId: string, queryName: string) => {
+    try {
+      await dispatch(deleteSearchQuery(queryId) as any).unwrap();
+      message.success(`Deleted query "${queryName}" successfully`);
+    } catch (error: any) {
+      console.error('LeadSearch: Delete query error:', error);
+      const errorMessage = getDetailedErrorMessage(error, 'Failed to delete query');
+      message.error(errorMessage);
     }
   };
 
@@ -172,38 +217,60 @@ const LeadSearch: React.FC<LeadSearchProps> = ({ onSearchComplete }) => {
           size="small" 
           title="Saved Search Queries" 
           style={{ marginBottom: 16 }}
-          bodyStyle={{ maxHeight: 200, overflowY: 'auto' }}
+          styles={{ body: { maxHeight: 200, overflowY: 'auto' } }}
         >
-          <Row gutter={[8, 8]}>
-            {searchQueries.map(query => (
-              <Col key={query.id} span={12}>
-                <Card 
-                  size="small"
-                  hoverable
-                  onClick={() => handleExecuteSavedQuery(query.id)}
-                  bodyStyle={{ padding: 8 }}
-                >
-                  <div style={{ fontSize: '12px' }}>
-                    <strong>{query.query_name}</strong>
-                    <br />
-                    <Tag color="blue">
-                      {query.results_count} results
-                    </Tag>
-                    <Tag color={query.status === 'active' ? 'green' : 'orange'}>
-                      {query.status}
-                    </Tag>
-                  </div>
-                </Card>
-              </Col>
-            ))}
-            {searchQueries.length === 0 && (
-              <Col span={24}>
-                <div style={{ textAlign: 'center', color: '#999' }}>
-                  No saved queries yet
-                </div>
-              </Col>
-            )}
-          </Row>
+          {searchQueries.length > 0 ? (
+            <Row gutter={[8, 8]}>
+              {searchQueries.map(query => (
+                <Col key={query.id} span={12}>
+                  <Card 
+                    size="small"
+                    hoverable
+                    styles={{ body: { padding: 8 } }}
+                    extra={
+                      <Popconfirm
+                        title="Delete Query"
+                        description={`Are you sure you want to delete "${query.name}"?`}
+                        onConfirm={(e) => {
+                          e?.stopPropagation();
+                          handleDeleteQuery(query.id, query.name);
+                        }}
+                        okText="Delete"
+                        cancelText="Cancel"
+                        okType="danger"
+                      >
+                        <Button 
+                          type="text" 
+                          size="small" 
+                          icon={<DeleteOutlined />}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ color: '#ff4d4f' }}
+                        />
+                      </Popconfirm>
+                    }
+                  >
+                    <div 
+                      style={{ fontSize: '12px', cursor: 'pointer' }}
+                      onClick={() => handleLoadSavedQuery(query.id)}
+                    >
+                      <strong>{query.name}</strong>
+                      <br />
+                      <Tag color="blue">
+                        {query.queryConfig?.jobTitles?.join(', ') || 'No job title'}
+                      </Tag>
+                      <Tag color={query.isActive ? 'green' : 'orange'}>
+                        {query.isActive ? 'active' : 'inactive'}
+                      </Tag>
+                    </div>
+                  </Card>
+                </Col>
+              ))}
+            </Row>
+          ) : (
+            <div style={{ textAlign: 'center', color: '#999', padding: '20px' }}>
+              {loading.queries ? 'Loading saved queries...' : 'No saved queries available'}
+            </div>
+          )}
         </Card>
       )}
 

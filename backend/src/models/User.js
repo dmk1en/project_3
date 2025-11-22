@@ -15,7 +15,7 @@ const User = sequelize.define('User', {
       isEmail: true
     }
   },
-  passwordHash: {
+  password: {
     type: DataTypes.STRING(255),
     allowNull: false,
     field: 'password_hash'
@@ -31,14 +31,19 @@ const User = sequelize.define('User', {
     field: 'last_name'
   },
   role: {
-    type: DataTypes.ENUM('admin', 'manager', 'sales_rep', 'analyst'),
+    type: DataTypes.ENUM('admin', 'manager', 'user', 'viewer', 'sales_rep', 'analyst'),
     allowNull: false,
-    defaultValue: 'sales_rep'
+    defaultValue: 'user'
   },
-  isActive: {
-    type: DataTypes.BOOLEAN,
-    defaultValue: true,
-    field: 'is_active'
+  status: {
+    type: DataTypes.ENUM('active', 'inactive', 'suspended'),
+    allowNull: false,
+    defaultValue: 'active'
+  },
+  permissions: {
+    type: DataTypes.JSON,
+    allowNull: true,
+    defaultValue: []
   },
   emailVerified: {
     type: DataTypes.BOOLEAN,
@@ -60,7 +65,7 @@ const User = sequelize.define('User', {
       fields: ['role']
     },
     {
-      fields: ['is_active']
+      fields: ['status']
     }
   ]
 });

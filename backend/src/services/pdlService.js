@@ -102,20 +102,16 @@ class PDLService {
 
     const mustClauses = [];
 
-    // Job titles - use match for fuzzy matching
+    // Job titles - use terms for exact matching of multiple values
     if (jobTitles.length > 0) {
-      const titleQueries = jobTitles.map(title => ({
-        match: { "job_title": title.toLowerCase() }
-      }));
-      
-      if (titleQueries.length === 1) {
-        mustClauses.push(titleQueries[0]);
-      } else {
+      if (jobTitles.length === 1) {
         mustClauses.push({
-          bool: {
-            should: titleQueries,
-            minimum_should_match: 1
-          }
+          match: { "job_title": jobTitles[0].toLowerCase() }
+        });
+      } else {
+        // Use terms query for multiple job titles
+        mustClauses.push({
+          terms: { "job_title": jobTitles.map(title => title.toLowerCase()) }
         });
       }
     }
@@ -133,56 +129,41 @@ class PDLService {
       }
     }
 
-    // Cities - match for fuzzy matching
+    // Cities - use terms for multiple cities
     if (cities.length > 0) {
-      const cityQueries = cities.map(city => ({
-        match: { "location_locality": city.toLowerCase() }
-      }));
-      
-      if (cityQueries.length === 1) {
-        mustClauses.push(cityQueries[0]);
+      if (cities.length === 1) {
+        mustClauses.push({
+          match: { "location_locality": cities[0].toLowerCase() }
+        });
       } else {
         mustClauses.push({
-          bool: {
-            should: cityQueries,
-            minimum_should_match: 1
-          }
+          terms: { "location_locality": cities.map(city => city.toLowerCase()) }
         });
       }
     }
 
-    // Industries - match for fuzzy matching
+    // Industries - use terms for multiple industries
     if (industries.length > 0) {
-      const industryQueries = industries.map(industry => ({
-        match: { "industry": industry.toLowerCase() }
-      }));
-      
-      if (industryQueries.length === 1) {
-        mustClauses.push(industryQueries[0]);
+      if (industries.length === 1) {
+        mustClauses.push({
+          match: { "industry": industries[0].toLowerCase() }
+        });
       } else {
         mustClauses.push({
-          bool: {
-            should: industryQueries,
-            minimum_should_match: 1
-          }
+          terms: { "industry": industries.map(industry => industry.toLowerCase()) }
         });
       }
     }
 
-    // Companies - match for fuzzy matching
+    // Companies - use terms for multiple companies
     if (companies.length > 0) {
-      const companyQueries = companies.map(company => ({
-        match: { "job_company_name": company.toLowerCase() }
-      }));
-      
-      if (companyQueries.length === 1) {
-        mustClauses.push(companyQueries[0]);
+      if (companies.length === 1) {
+        mustClauses.push({
+          match: { "job_company_name": companies[0].toLowerCase() }
+        });
       } else {
         mustClauses.push({
-          bool: {
-            should: companyQueries,
-            minimum_should_match: 1
-          }
+          terms: { "job_company_name": companies.map(company => company.toLowerCase()) }
         });
       }
     }
@@ -239,7 +220,9 @@ class PDLService {
           locationCountry: person.location_country,
           locationCity: person.location_locality,
           industry: person.industry,
-          linkedinUrl: person.linkedin_url,
+          linkedinUrl: person.linkedin_url && !person.linkedin_url.startsWith('http') 
+            ? `https://${person.linkedin_url}` 
+            : person.linkedin_url,
           email: person.emails?.[0]?.address,
           phone: person.phone_numbers?.[0]?.number,
           sourceQuery: JSON.stringify(queryInfo.queryConfig),

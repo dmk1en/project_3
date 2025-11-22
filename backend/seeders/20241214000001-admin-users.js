@@ -16,7 +16,8 @@ module.exports = {
         first_name: 'Admin',
         last_name: 'User',
         role: 'admin',
-        is_active: true,
+        status: 'active',
+        permissions: JSON.stringify(['admin', 'read_leads', 'update_leads', 'delete_leads', 'pdl_search', 'manage_contacts', 'manage_companies', 'manage_users']),
         email_verified: true,
         created_at: now,
         updated_at: now
@@ -28,7 +29,8 @@ module.exports = {
         first_name: 'Sales',
         last_name: 'Manager',
         role: 'manager',
-        is_active: true,
+        status: 'active',
+        permissions: JSON.stringify(['read_leads', 'update_leads', 'delete_leads', 'pdl_search', 'manage_contacts', 'manage_companies']),
         email_verified: true,
         created_at: now,
         updated_at: now

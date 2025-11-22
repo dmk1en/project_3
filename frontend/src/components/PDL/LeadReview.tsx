@@ -38,29 +38,29 @@ import {
   MoreOutlined,
   FilterOutlined,
   ReloadOutlined,
-  TeamOutlined
+  TeamOutlined,
+  UserAddOutlined
 } from '@ant-design/icons';
 import { useDispatch, useSelector } from 'react-redux';
 import { RootState } from '../../store';
 import {
   fetchLeads,
-  updateLead,
-  deleteLead,
   setSelectedLeads,
   toggleLeadSelection,
   selectAllLeads,
   clearSelection,
   bulkUpdateLeads,
-  enrichLead,
   setCurrentLead
 } from '../../features/pdl/pdlSlice';
 import { PotentialLead } from '../../services/pdlService';
+import ManualLeadModal from './ManualLeadModal';
+import { getErrorMessage } from '../../utils/errorUtils';
 
 const { Option } = Select;
 const { Search } = Input;
 
 interface LeadReviewProps {
-  onConvertLeads?: (leadIds: string[]) => void;
+  onConvertLeads?: (leads: PotentialLead[]) => void;
 }
 
 const LeadReview: React.FC<LeadReviewProps> = ({ onConvertLeads }) => {
@@ -68,6 +68,8 @@ const LeadReview: React.FC<LeadReviewProps> = ({ onConvertLeads }) => {
   const [detailsVisible, setDetailsVisible] = useState(false);
   const [selectedLead, setSelectedLead] = useState<PotentialLead | null>(null);
   const [bulkActionVisible, setBulkActionVisible] = useState(false);
+  const [manualLeadModalVisible, setManualLeadModalVisible] = useState(false);
+  const [editingLead, setEditingLead] = useState<PotentialLead | null>(null);
   const [filters, setFilters] = useState({
     status: 'all',
     lead_type: 'all',
@@ -102,14 +104,279 @@ const LeadReview: React.FC<LeadReviewProps> = ({ onConvertLeads }) => {
     dispatch(setCurrentLead(lead) as any);
   };
 
-  const handleUpdateStatus = async (leadId: string, status: string) => {
+  const handleEditLead = (lead: PotentialLead) => {
+    setEditingLead(lead);
+    setManualLeadModalVisible(true);
+  };
+
+  const handleDeleteLead = async (lead: PotentialLead) => {
+    Modal.confirm({
+      title: 'Delete Lead',
+      content: `Are you sure you want to delete "${lead.fullName}"? This action cannot be undone.`,
+      okText: 'Delete',
+      okType: 'danger',
+      cancelText: 'Cancel',
+      onOk: async () => {
+        try {
+          const { pdlService } = await import('../../services/pdlService');
+          await pdlService.deleteLead(lead.id);
+          message.success(`Deleted ${lead.fullName}`);
+          handleRefresh();
+        } catch (error: any) {
+          message.error(`Failed to delete lead: ${getErrorMessage(error, 'Delete failed')}`);
+        }
+      }
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    const selectedLeadObjects = leads.filter(lead => selectedLeads.includes(lead.id));
+    const manualLeads = selectedLeadObjects.filter(lead => lead.isManual || !lead.pdlProfileId);
+    const convertedLeads = selectedLeadObjects.filter(lead => lead.status === 'converted');
+    
+    if (convertedLeads.length > 0) {
+      message.error(`Cannot delete ${convertedLeads.length} leads that have been converted to CRM contacts`);
+      return;
+    }
+    
+    if (manualLeads.length === 0) {
+      message.error('Only manual leads can be deleted. PDL-sourced leads cannot be deleted.');
+      return;
+    }
+    
+    if (manualLeads.length < selectedLeadObjects.length) {
+      message.warning(`Only ${manualLeads.length} out of ${selectedLeadObjects.length} selected leads can be deleted (manual leads only)`);
+    }
+
+    Modal.confirm({
+      title: 'Delete Leads',
+      content: `Are you sure you want to delete ${manualLeads.length} lead(s)? This action cannot be undone.`,
+      okText: 'Delete',
+      okType: 'danger',
+      cancelText: 'Cancel',
+      onOk: async () => {
+        let successful = 0;
+        let failed = 0;
+        const errors: string[] = [];
+
+        try {
+          const { pdlService } = await import('../../services/pdlService');
+          
+          for (const lead of manualLeads) {
+            try {
+              await pdlService.deleteLead(lead.id);
+              successful++;
+            } catch (error: any) {
+              failed++;
+              errors.push(`${lead.fullName}: ${error.response?.data?.error?.message || error.message}`);
+            }
+          }
+
+          if (successful > 0) {
+            message.success(`Successfully deleted ${successful} lead(s)`);
+            handleRefresh();
+            dispatch(clearSelection() as any);
+          }
+          
+          if (failed > 0) {
+            Modal.error({
+              title: 'Some deletions failed',
+              content: (
+                <div>
+                  <p>{failed} lead(s) could not be deleted:</p>
+                  <ul>
+                    {errors.map((error, index) => (
+                      <li key={index} style={{ fontSize: '12px' }}>{error}</li>
+                    ))}
+                  </ul>
+                </div>
+              )
+            });
+          }
+        } catch (error: any) {
+          message.error(`Bulk delete failed: ${getErrorMessage(error, 'Bulk delete failed')}`);
+        }
+      }
+    });
+  };
+
+  const handleEnrichLead = async (lead: PotentialLead) => {
     try {
-      await dispatch(updateLead({ id: leadId, data: { status: status as any } }) as any).unwrap();
-      message.success('Lead status updated');
-    } catch (error) {
-      message.error('Failed to update lead status');
+      const { pdlService } = await import('../../services/pdlService');
+      
+      message.loading({ content: 'Enriching lead data...', key: 'enrich' });
+      
+      // For PDL-sourced leads, force enrichment
+      const isPDLSourced = !!lead.pdl_id;
+      const result = await pdlService.enrichLead(lead.id, isPDLSourced);
+      
+      if (result.success) {
+        // Show success message with optional warning
+        if (result.warning) {
+          message.warning({ 
+            content: `Enriched ${lead.fullName} - ${result.warning}`, 
+            key: 'enrich',
+            duration: 6
+          });
+        } else {
+          message.success({ 
+            content: `Successfully enriched ${lead.fullName}`, 
+            key: 'enrich' 
+          });
+        }
+        
+        // Refresh the leads list to show updated data
+        handleRefresh();
+        
+        // Show enriched data in a modal
+        Modal.success({
+          title: result.warning ? 'Enrichment Completed with Warnings' : 'Enrichment Successful',
+          content: (
+            <div>
+              <p><strong>Lead:</strong> {lead.fullName}</p>
+              {result.warning && (
+                <div style={{ marginBottom: '12px', padding: '8px', backgroundColor: '#fff7e6', border: '1px solid #ffd591', borderRadius: '4px' }}>
+                  <p style={{ margin: 0, color: '#d46b08' }}><strong>⚠️ Warning:</strong> {result.warning}</p>
+                </div>
+              )}
+              {result.updatedFields && Object.keys(result.updatedFields).length > 0 && (
+                <>
+                  <p><strong>Updated fields:</strong></p>
+                  <ul>
+                    {Object.entries(result.updatedFields).map(([key, value]) => (
+                      <li key={key}><strong>{key}:</strong> {Array.isArray(value) ? value.join(', ') : String(value)}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              {(!result.updatedFields || Object.keys(result.updatedFields).length === 0) && (
+                <p>No new data was found during enrichment, but the process completed successfully.</p>
+              )}
+            </div>
+          ),
+          width: 500
+        });
+      } else {
+        // Show detailed error with warning if available
+        const errorMessage = result.error?.message || result.error || 'Unknown error';
+        const fullMessage = result.warning 
+          ? `${errorMessage} - Tip: ${result.warning}`
+          : errorMessage;
+          
+        message.error({ 
+          content: `Enrichment failed: ${fullMessage}`, 
+          key: 'enrich',
+          duration: 8
+        });
+        
+        // Show detailed modal for insufficient data errors
+        if (result.warning) {
+          Modal.warning({
+            title: 'Enrichment Failed - Insufficient Data',
+            content: (
+              <div>
+                <p><strong>Lead:</strong> {lead.fullName}</p>
+                <p><strong>Error:</strong> {errorMessage}</p>
+                <div style={{ marginTop: '12px', padding: '8px', backgroundColor: '#fff7e6', border: '1px solid #ffd591', borderRadius: '4px' }}>
+                  <p style={{ margin: 0, color: '#d46b08' }}><strong>💡 Suggestion:</strong> {result.warning}</p>
+                </div>
+                <p style={{ marginTop: '12px', fontSize: '12px', color: '#666' }}>
+                  Try adding more contact information like email, phone, company, or location for better enrichment results.
+                </p>
+              </div>
+            ),
+            width: 500
+          });
+        }
+      }
+    } catch (error: any) {
+      message.error({ 
+        content: `Enrichment failed: ${error.message || 'Network error'}`, 
+        key: 'enrich' 
+      });
     }
   };
+
+  const handleBulkEnrichment = async () => {
+    const selectedLeadObjects = leads.filter(lead => selectedLeads.includes(lead.id));
+    const totalLeads = selectedLeadObjects.length;
+    let successful = 0;
+    let failed = 0;
+    const errors: string[] = [];
+
+    try {
+      const { pdlService } = await import('../../services/pdlService');
+      
+      message.loading({ content: `Enriching ${totalLeads} leads...`, key: 'bulkEnrich' });
+
+      // Enrich leads one by one to avoid overwhelming the API
+      for (const lead of selectedLeadObjects) {
+        try {
+          const isPDLSourced = !!lead.pdl_id;
+          const result = await pdlService.enrichLead(lead.id, isPDLSourced);
+          
+          if (result.success) {
+            successful++;
+            if (result.warning) {
+              errors.push(`${lead.fullName}: ⚠️ ${result.warning}`);
+            }
+          } else {
+            failed++;
+            const errorMsg = result.error?.message || result.error || 'Unknown error';
+            const fullError = result.warning ? `${errorMsg} (Tip: ${result.warning})` : errorMsg;
+            errors.push(`${lead.fullName}: ${fullError}`);
+          }
+        } catch (error: any) {
+          failed++;
+          errors.push(`${lead.fullName}: ${error.message || 'Network error'}`);
+        }
+
+        // Add a small delay to avoid rate limiting
+        if (selectedLeadObjects.indexOf(lead) < selectedLeadObjects.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+
+      message.success({ 
+        content: `Bulk enrichment completed: ${successful} successful, ${failed} failed`, 
+        key: 'bulkEnrich' 
+      });
+
+      // Show detailed results
+      Modal.info({
+        title: 'Bulk Enrichment Results',
+        content: (
+          <div>
+            <p><strong>Total leads processed:</strong> {totalLeads}</p>
+            <p><strong>Successful:</strong> {successful}</p>
+            <p><strong>Failed:</strong> {failed}</p>
+            {errors.length > 0 && (
+              <>
+                <p><strong>Errors:</strong></p>
+                <ul style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                  {errors.map((error, index) => (
+                    <li key={index} style={{ fontSize: '12px' }}>{error}</li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </div>
+        ),
+        width: 600
+      });
+
+      // Refresh the leads list to show updated data
+      handleRefresh();
+      
+    } catch (error: any) {
+      message.error({ 
+        content: `Bulk enrichment failed: ${error.message || 'Unknown error'}`, 
+        key: 'bulkEnrich' 
+      });
+    }
+  };
+
+  // Individual lead status updates not available for PDL data retrieval
 
   const handleBulkAction = async (action: string, value?: any) => {
     if (selectedLeads.length === 0) {
@@ -119,21 +386,12 @@ const LeadReview: React.FC<LeadReviewProps> = ({ onConvertLeads }) => {
 
     try {
       if (action === 'convert') {
-        onConvertLeads?.(selectedLeads);
+        const selectedLeadObjects = leads.filter(lead => selectedLeads.includes(lead.id));
+        onConvertLeads?.(selectedLeadObjects);
+      } else if (action === 'enrich') {
+        await handleBulkEnrichment();
       } else if (action === 'delete') {
-        Modal.confirm({
-          title: 'Delete Selected Leads',
-          content: `Are you sure you want to delete ${selectedLeads.length} leads?`,
-          okType: 'danger',
-          onOk: async () => {
-            for (const leadId of selectedLeads) {
-              await dispatch(deleteLead(leadId) as any).unwrap();
-            }
-            message.success(`Deleted ${selectedLeads.length} leads`);
-            dispatch(clearSelection() as any);
-          }
-        });
-        return;
+        await handleBulkDelete();
       } else {
         const updates: any = { leadIds: selectedLeads };
         if (action === 'status') updates.status = value;
@@ -150,14 +408,7 @@ const LeadReview: React.FC<LeadReviewProps> = ({ onConvertLeads }) => {
     }
   };
 
-  const handleEnrichLead = async (leadId: string) => {
-    try {
-      await dispatch(enrichLead(leadId) as any).unwrap();
-      message.success('Lead data enriched successfully');
-    } catch (error) {
-      message.error('Failed to enrich lead data');
-    }
-  };
+  // Lead enrichment not available for PDL data retrieval
 
   const getScoreColor = (score: number) => {
     if (score >= 80) return '#52c41a';
@@ -195,6 +446,11 @@ const LeadReview: React.FC<LeadReviewProps> = ({ onConvertLeads }) => {
           <div>
             <div style={{ fontWeight: 'bold', cursor: 'pointer' }} onClick={() => handleLeadClick(record)}>
               {record.fullName}
+              {(record.isManual || !record.pdlProfileId) && (
+                <Tag color="blue" style={{ marginLeft: 8 }}>
+                  Manual
+                </Tag>
+              )}
             </div>
             <div style={{ fontSize: '12px', color: '#666' }}>
               {record.jobTitle}
@@ -257,7 +513,7 @@ const LeadReview: React.FC<LeadReviewProps> = ({ onConvertLeads }) => {
                   type="link"
                   icon={<LinkedinOutlined />}
                   size="small"
-                  href={record.linkedinUrl}
+                  href={record.linkedinUrl.startsWith('http') ? record.linkedinUrl : `https://${record.linkedinUrl}`}
                   target="_blank"
                 />
               </Tooltip>
@@ -328,7 +584,8 @@ const LeadReview: React.FC<LeadReviewProps> = ({ onConvertLeads }) => {
           value={status}
           size="small"
           style={{ width: '100%' }}
-          onChange={(value) => handleUpdateStatus(record.id, value)}
+          disabled
+          title="Status updates not available for PDL data retrieval"
         >
           <Option value="pending">
             <Badge status="processing" text="Pending" />
@@ -363,28 +620,27 @@ const LeadReview: React.FC<LeadReviewProps> = ({ onConvertLeads }) => {
                 key: 'enrich',
                 label: 'Enrich Data',
                 icon: <ReloadOutlined />,
-                onClick: () => handleEnrichLead(record.id)
+                onClick: () => handleEnrichLead(record)
               },
+              ...(record.isManual || !record.pdlProfileId ? [{
+                key: 'edit',
+                label: 'Edit Lead',
+                icon: <EditOutlined />,
+                onClick: () => handleEditLead(record)
+              }] : []),
               {
                 key: 'convert',
                 label: 'Convert to CRM',
                 icon: <CheckOutlined />,
-                onClick: () => onConvertLeads?.([record.id])
+                onClick: () => onConvertLeads?.([record])
               },
               { type: 'divider' },
               {
                 key: 'delete',
-                label: 'Delete',
+                label: record.isManual || !record.pdlProfileId ? 'Delete Lead' : 'Delete Not Available',
                 icon: <DeleteOutlined />,
-                danger: true,
-                onClick: () => {
-                  Modal.confirm({
-                    title: 'Delete Lead',
-                    content: 'Are you sure you want to delete this lead?',
-                    okType: 'danger',
-                    onOk: () => dispatch(deleteLead(record.id) as any)
-                  });
-                }
+                disabled: !(record.isManual || !record.pdlProfileId) || record.status === 'converted',
+                onClick: () => record.isManual || !record.pdlProfileId ? handleDeleteLead(record) : message.info('Delete not available for PDL-sourced leads')
               }
             ]
           }}
@@ -471,6 +727,13 @@ const LeadReview: React.FC<LeadReviewProps> = ({ onConvertLeads }) => {
           <Col span={8} style={{ textAlign: 'center' }}>
             <Space>
               <Button
+                type="primary"
+                icon={<UserAddOutlined />}
+                onClick={() => setManualLeadModalVisible(true)}
+              >
+                Create Manual Lead
+              </Button>
+              <Button
                 type={selectedLeads.length > 0 ? "primary" : "default"}
                 onClick={() => dispatch(selectAllLeads() as any)}
                 disabled={leads.length === 0}
@@ -545,14 +808,14 @@ const LeadReview: React.FC<LeadReviewProps> = ({ onConvertLeads }) => {
             <Button
               type="primary"
               icon={<CheckOutlined />}
-              onClick={() => selectedLead && onConvertLeads?.([selectedLead.id])}
+              onClick={() => selectedLead && onConvertLeads?.([selectedLead])}
             >
               Convert to CRM
             </Button>
             <Button
               icon={<ReloadOutlined />}
-              onClick={() => selectedLead && handleEnrichLead(selectedLead.id)}
-              loading={loading.enrichment}
+              disabled
+              title="Enrich data not available for PDL data retrieval"
             >
               Enrich Data
             </Button>
@@ -621,7 +884,7 @@ const LeadReview: React.FC<LeadReviewProps> = ({ onConvertLeads }) => {
               </Descriptions.Item>
               <Descriptions.Item label="LinkedIn">
                 {selectedLead.linkedinUrl ? (
-                  <a href={selectedLead.linkedinUrl} target="_blank" rel="noopener noreferrer">
+                  <a href={selectedLead.linkedinUrl.startsWith('http') ? selectedLead.linkedinUrl : `https://${selectedLead.linkedinUrl}`} target="_blank" rel="noopener noreferrer">
                     <LinkedinOutlined /> View Profile
                   </a>
                 ) : 'Not available'}
@@ -668,6 +931,21 @@ const LeadReview: React.FC<LeadReviewProps> = ({ onConvertLeads }) => {
         onCancel={() => setBulkActionVisible(false)}
         footer={null}
       >
+        {selectedLeads.length > 0 && (
+          <div style={{ marginBottom: 16, padding: 12, backgroundColor: '#f6ffed', borderRadius: 6 }}>
+            <p style={{ margin: 0, fontSize: '14px' }}>
+              <strong>Selected leads breakdown:</strong>
+            </p>
+            <ul style={{ margin: '8px 0 0 0', paddingLeft: 20 }}>
+              <li>Manual leads: {leads.filter(lead => selectedLeads.includes(lead.id) && (lead.isManual || !lead.pdlProfileId)).length}</li>
+              <li>PDL-sourced leads: {leads.filter(lead => selectedLeads.includes(lead.id) && lead.pdlProfileId && !lead.isManual).length}</li>
+              <li>Converted leads: {leads.filter(lead => selectedLeads.includes(lead.id) && lead.status === 'converted').length}</li>
+            </ul>
+            <p style={{ margin: '8px 0 0 0', fontSize: '12px', color: '#666' }}>
+              Note: Only manual leads can be deleted. Converted leads cannot be deleted.
+            </p>
+          </div>
+        )}
         <Space direction="vertical" style={{ width: '100%' }}>
           <Button
             type="primary"
@@ -677,6 +955,15 @@ const LeadReview: React.FC<LeadReviewProps> = ({ onConvertLeads }) => {
             size="large"
           >
             Convert to CRM Contacts
+          </Button>
+          
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={() => handleBulkAction('enrich')}
+            block
+            size="large"
+          >
+            Enrich Selected Leads
           </Button>
           
           <Space.Compact style={{ width: '100%' }}>
@@ -708,11 +995,27 @@ const LeadReview: React.FC<LeadReviewProps> = ({ onConvertLeads }) => {
             icon={<DeleteOutlined />}
             onClick={() => handleBulkAction('delete')}
             block
+            disabled={selectedLeads.length === 0}
           >
             Delete Selected Leads
           </Button>
         </Space>
       </Modal>
+
+      {/* Manual Lead Creation/Edit Modal */}
+      <ManualLeadModal
+        visible={manualLeadModalVisible}
+        onCancel={() => {
+          setManualLeadModalVisible(false);
+          setEditingLead(null);
+        }}
+        onSuccess={() => {
+          setManualLeadModalVisible(false);
+          setEditingLead(null);
+          handleRefresh();
+        }}
+        editingLead={editingLead}
+      />
     </div>
   );
 };

@@ -71,6 +71,9 @@ class CompanyController {
         raw: false
       });
 
+      // Handle count when using GROUP BY - Sequelize returns array
+      const totalCount = Array.isArray(count) ? count.length : count;
+
       // Calculate additional metrics for each company
       const companiesWithMetrics = await Promise.all(
         companies.map(async (company) => {
@@ -97,7 +100,7 @@ class CompanyController {
         })
       );
 
-      const totalPages = Math.ceil(count / limitValue);
+      const totalPages = Math.ceil(totalCount / limitValue);
 
       res.json({
         success: true,
@@ -106,7 +109,7 @@ class CompanyController {
           pagination: {
             currentPage: parseInt(page),
             totalPages,
-            totalItems: count,
+            totalItems: totalCount,
             itemsPerPage: limitValue
           }
         }
