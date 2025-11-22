@@ -4,12 +4,6 @@ A comprehensive Customer Relationship Management system with social media integr
 
 ![CRM Dashboard Demo](./docs/image.png)
 
-# Demo Video
-
-<video controls width="100%">
-    <source src="./docs/demo.mp4" type="video/mp4">
-</video>
-
 ## 📋 Table of Contents
 
 - [Features](#-features)
@@ -336,4 +330,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 
 **🚀 Ready to revolutionize your customer relationship management? Get started today!**
+
 
