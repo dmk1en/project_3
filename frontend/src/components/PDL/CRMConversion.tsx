@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Modal,
   Card,
@@ -75,6 +75,11 @@ const CRMConversion: React.FC<CRMConversionProps> = ({
   });
 
   const { loading, conversionResult, error } = useSelector((state: RootState) => state.pdl);
+
+  // Sync selectedLeads state with leadIds prop when it changes
+  useEffect(() => {
+    setSelectedLeads(leadIds);
+  }, [leadIds]);
 
   // Get leads to convert - ensure leads is an array
   const leadsToConvert = Array.isArray(leads) 

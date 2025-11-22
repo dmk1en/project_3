@@ -9,6 +9,7 @@ const Opportunity = sequelize.define('Opportunity', {
   },
   name: {
     type: DataTypes.STRING(255),
+    field: 'title',
     allowNull: false
   },
   contactId: {
@@ -29,7 +30,7 @@ const Opportunity = sequelize.define('Opportunity', {
   },
   stageId: {
     type: DataTypes.UUID,
-    field: 'stage_id',
+    field: 'pipeline_stage_id',
     references: {
       model: 'pipeline_stages',
       key: 'id'
@@ -37,7 +38,7 @@ const Opportunity = sequelize.define('Opportunity', {
   },
   assignedTo: {
     type: DataTypes.UUID,
-    field: 'assigned_to',
+    field: 'assigned_user_id',
     references: {
       model: 'users',
       key: 'id'
@@ -68,22 +69,22 @@ const Opportunity = sequelize.define('Opportunity', {
   description: {
     type: DataTypes.TEXT
   },
-  nextAction: {
-    type: DataTypes.TEXT,
-    field: 'next_action'
+  status: {
+    type: DataTypes.ENUM('open', 'won', 'lost', 'on_hold'),
+    defaultValue: 'open'
   },
-  customFields: {
-    type: DataTypes.JSONB,
-    field: 'custom_fields'
+  lostReason: {
+    type: DataTypes.STRING(500),
+    field: 'lost_reason'
   }
 }, {
   tableName: 'opportunities',
   indexes: [
     {
-      fields: ['stage_id']
+      fields: ['pipeline_stage_id']
     },
     {
-      fields: ['assigned_to']
+      fields: ['assigned_user_id']
     },
     {
       fields: ['expected_close_date']

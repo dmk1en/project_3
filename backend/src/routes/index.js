@@ -7,6 +7,7 @@ const pipelineStageRoutes = require('./pipelineStages');
 const socialRoutes = require('./social');
 const analyticsRoutes = require('./analytics');
 const pdlRoutes = require('./pdl');
+const adminRoutes = require('./admin');
 
 const router = express.Router();
 
@@ -18,6 +19,7 @@ router.use('/opportunities', opportunityRoutes);
 router.use('/pipeline-stages', pipelineStageRoutes);
 router.use('/social', socialRoutes);
 router.use('/analytics', analyticsRoutes);
+router.use('/admin', adminRoutes);
 router.use('/pdl', pdlRoutes);
 
 // Health check endpoint

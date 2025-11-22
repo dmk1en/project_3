@@ -20,74 +20,149 @@ export const fetchLeads = createAsyncThunk(
 
 export const fetchLead = createAsyncThunk(
   'pdl/fetchLead',
-  async (id: string) => {
-    return await pdlService.getLead(id);
+  async (id: string, { rejectWithValue }) => {
+    try {
+      return await pdlService.getLead(id);
+    } catch (error: any) {
+      console.error('Failed to fetch lead:', error);
+      const errorMessage = error?.response?.data?.message || 
+                          error?.response?.data?.error || 
+                          error?.message || 
+                          'Failed to fetch lead';
+      return rejectWithValue(errorMessage);
+    }
   }
 );
 
 export const searchLeads = createAsyncThunk(
   'pdl/searchLeads',
-  async (filters: PDLSearchFilters) => {
-    return await pdlService.searchLeads(filters);
+  async (filters: PDLSearchFilters, { rejectWithValue }) => {
+    try {
+      return await pdlService.searchLeads(filters);
+    } catch (error: any) {
+      console.error('Failed to search leads:', error);
+      const errorMessage = error?.response?.data?.message || 
+                          error?.response?.data?.error || 
+                          error?.message || 
+                          'Failed to search leads';
+      return rejectWithValue(errorMessage);
+    }
   }
 );
 
-export const updateLead = createAsyncThunk(
-  'pdl/updateLead',
-  async ({ id, data }: { id: string; data: Partial<PotentialLead> }) => {
-    return await pdlService.updateLead(id, data);
-  }
-);
-
-export const deleteLead = createAsyncThunk(
-  'pdl/deleteLead',
-  async (id: string) => {
-    await pdlService.deleteLead(id);
-    return id;
-  }
-);
+// Note: Individual lead updates/deletes not needed for PDL data retrieval
+// Use bulk operations if needed
 
 export const fetchSearchQueries = createAsyncThunk(
   'pdl/fetchSearchQueries',
-  async () => {
-    return await pdlService.getSearchQueries();
+  async (_, { rejectWithValue }) => {
+    try {
+      return await pdlService.getSearchQueries();
+    } catch (error: any) {
+      console.error('Failed to fetch search queries:', error);
+      const errorMessage = error?.response?.data?.message || 
+                          error?.response?.data?.error || 
+                          error?.message || 
+                          'Failed to fetch search queries';
+      return rejectWithValue(errorMessage);
+    }
   }
 );
 
 export const createSearchQuery = createAsyncThunk(
   'pdl/createSearchQuery',
-  async (queryData: { query_name: string; search_criteria: PDLSearchFilters }) => {
-    return await pdlService.createSearchQuery(queryData);
+  async (queryData: { query_name: string; search_criteria: PDLSearchFilters; description?: string }, { rejectWithValue }) => {
+    try {
+      return await pdlService.createSearchQuery(queryData);
+    } catch (error: any) {
+      console.error('Failed to create search query:', error);
+      const errorMessage = error?.response?.data?.message || 
+                          error?.response?.data?.error || 
+                          error?.message || 
+                          'Failed to create search query';
+      return rejectWithValue(errorMessage);
+    }
   }
 );
 
 export const executeSearchQuery = createAsyncThunk(
   'pdl/executeSearchQuery',
-  async (id: string) => {
-    return await pdlService.executeSearchQuery(id);
+  async (id: string, { rejectWithValue }) => {
+    try {
+      return await pdlService.executeSearchQuery(id);
+    } catch (error: any) {
+      console.error('Failed to execute search query:', error);
+      const errorMessage = error?.response?.data?.message || 
+                          error?.response?.data?.error || 
+                          error?.message || 
+                          'Failed to execute search query';
+      return rejectWithValue(errorMessage);
+    }
+  }
+);
+
+export const deleteSearchQuery = createAsyncThunk(
+  'pdl/deleteSearchQuery',
+  async (id: string, { rejectWithValue }) => {
+    try {
+      const result = await pdlService.deleteSearchQuery(id);
+      return { id, result };
+    } catch (error: any) {
+      return rejectWithValue(error?.response?.data?.message || error.message || 'Failed to delete search query');
+    }
   }
 );
 
 export const convertToCRM = createAsyncThunk(
   'pdl/convertToCRM',
-  async (leadIds: string[]) => {
-    return await pdlService.convertToCRM(leadIds);
+  async (leadIds: string[], { rejectWithValue }) => {
+    try {
+      return await pdlService.convertToCRM(leadIds);
+    } catch (error: any) {
+      console.error('Failed to convert to CRM:', error);
+      const errorMessage = error?.response?.data?.message || 
+                          error?.response?.data?.error || 
+                          error?.message || 
+                          'Failed to convert leads to CRM';
+      return rejectWithValue(errorMessage);
+    }
   }
 );
 
 export const bulkUpdateLeads = createAsyncThunk(
   'pdl/bulkUpdateLeads',
-  async (updates: { leadIds: string[]; status?: string; leadType?: string }) => {
-    return await pdlService.bulkUpdateLeads(updates);
+  async (updates: { leadIds: string[]; status?: string; leadType?: string }, { rejectWithValue }) => {
+    try {
+      return await pdlService.bulkUpdateLeads(updates);
+    } catch (error: any) {
+      console.error('Failed to bulk update leads:', error);
+      const errorMessage = error?.response?.data?.message || 
+                          error?.response?.data?.error || 
+                          error?.message || 
+                          'Failed to bulk update leads';
+      return rejectWithValue(errorMessage);
+    }
   }
 );
 
-export const enrichLead = createAsyncThunk(
-  'pdl/enrichLead',
-  async (id: string) => {
-    return await pdlService.enrichLead(id);
+// Get API usage statistics
+export const fetchAPIUsage = createAsyncThunk(
+  'pdl/fetchAPIUsage',
+  async (_, { rejectWithValue }) => {
+    try {
+      return await pdlService.getAPIUsage();
+    } catch (error: any) {
+      console.error('Failed to fetch API usage:', error);
+      const errorMessage = error?.response?.data?.message || 
+                          error?.response?.data?.error || 
+                          error?.message || 
+                          'Failed to fetch API usage';
+      return rejectWithValue(errorMessage);
+    }
   }
 );
+
+// Note: Lead enrichment and analytics not implemented in backend
 
 // Types for the state
 interface PDLState {
@@ -107,14 +182,12 @@ interface PDLState {
     search: boolean;
     conversion: boolean;
     queries: boolean;
-    enrichment: boolean;
   };
   error: {
     leads: string | null;
     search: string | null;
     conversion: string | null;
     queries: string | null;
-    enrichment: string | null;
   };
   lastSearchResult: {
     query: PDLSearchFilters;
@@ -144,14 +217,12 @@ const initialState: PDLState = {
     search: false,
     conversion: false,
     queries: false,
-    enrichment: false,
   },
   error: {
     leads: null,
     search: null,
     conversion: null,
     queries: null,
-    enrichment: null,
   },
   lastSearchResult: null,
   conversionResult: null,
@@ -194,7 +265,6 @@ const pdlSlice = createSlice({
         search: null,
         conversion: null,
         queries: null,
-        enrichment: null,
       };
     },
     clearConversionResult: (state) => {
@@ -246,29 +316,7 @@ const pdlSlice = createSlice({
         state.error.search = action.error.message || 'Search failed';
       });
 
-    // Update lead
-    builder
-      .addCase(updateLead.fulfilled, (state, action) => {
-        const updatedLead = action.payload.data;
-        const index = state.leads.findIndex(lead => lead.id === updatedLead.id);
-        if (index !== -1) {
-          state.leads[index] = updatedLead;
-        }
-        if (state.currentLead && state.currentLead.id === updatedLead.id) {
-          state.currentLead = updatedLead;
-        }
-      });
-
-    // Delete lead
-    builder
-      .addCase(deleteLead.fulfilled, (state, action) => {
-        const leadId = action.payload;
-        state.leads = state.leads.filter(lead => lead.id !== leadId);
-        state.selectedLeads = state.selectedLeads.filter(id => id !== leadId);
-        if (state.currentLead && state.currentLead.id === leadId) {
-          state.currentLead = null;
-        }
-      });
+    // Note: Individual lead updates/deletes not implemented
 
     // Fetch search queries
     builder
@@ -299,6 +347,22 @@ const pdlSlice = createSlice({
       .addCase(executeSearchQuery.fulfilled, (state, action) => {
         state.loading.search = false;
         // Refresh leads after query execution
+      });
+
+    // Delete search query
+    builder
+      .addCase(deleteSearchQuery.pending, (state) => {
+        state.loading.queries = true;
+        state.error.queries = null;
+      })
+      .addCase(deleteSearchQuery.fulfilled, (state, action) => {
+        state.loading.queries = false;
+        // Remove the deleted query from the list
+        state.searchQueries = state.searchQueries.filter(query => query.id !== action.payload.id);
+      })
+      .addCase(deleteSearchQuery.rejected, (state, action) => {
+        state.loading.queries = false;
+        state.error.queries = action.payload as string;
       });
 
     // Convert to CRM
@@ -340,27 +404,21 @@ const pdlSlice = createSlice({
         });
       });
 
-    // Enrich lead
+    // API Usage
     builder
-      .addCase(enrichLead.pending, (state) => {
-        state.loading.enrichment = true;
-        state.error.enrichment = null;
+      .addCase(fetchAPIUsage.pending, (state) => {
+        state.loading.queries = true;
       })
-      .addCase(enrichLead.fulfilled, (state, action) => {
-        state.loading.enrichment = false;
-        const enrichedLead = action.payload.data;
-        const index = state.leads.findIndex(lead => lead.id === enrichedLead.id);
-        if (index !== -1) {
-          state.leads[index] = enrichedLead;
-        }
-        if (state.currentLead && state.currentLead.id === enrichedLead.id) {
-          state.currentLead = enrichedLead;
-        }
+      .addCase(fetchAPIUsage.fulfilled, (state, action) => {
+        state.loading.queries = false;
+        // API usage data can be stored in state if needed
       })
-      .addCase(enrichLead.rejected, (state, action) => {
-        state.loading.enrichment = false;
-        state.error.enrichment = action.error.message || 'Enrichment failed';
+      .addCase(fetchAPIUsage.rejected, (state, action) => {
+        state.loading.queries = false;
+        state.error.queries = action.error.message || 'Failed to fetch API usage';
       });
+
+    // Note: Lead enrichment and analytics not implemented
   },
 });
 

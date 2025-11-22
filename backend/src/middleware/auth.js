@@ -24,7 +24,7 @@ const authenticate = async (req, res, next) => {
     
     // Get user from database
     const user = await User.findByPk(decoded.id, {
-      attributes: { exclude: ['passwordHash'] }
+      attributes: { exclude: ['password'] }
     });
 
     if (!user) {
@@ -37,12 +37,12 @@ const authenticate = async (req, res, next) => {
       });
     }
 
-    if (!user.isActive) {
+    if (user.status !== 'active') {
       return res.status(401).json({
         success: false,
         error: {
           code: 'USER_INACTIVE',
-          message: 'User account is inactive'
+          message: 'User account is not active'
         }
       });
     }
@@ -108,31 +108,33 @@ const requirePermission = (permission) => {
     // Define role-based permissions
     const rolePermissions = {
       admin: [
-        'admin', 'create_contacts', 'read_contacts', 'update_contacts', 'delete_contacts',
-        'create_companies', 'read_companies', 'update_companies', 'delete_companies',
-        'create_opportunities', 'read_opportunities', 'update_opportunities', 'delete_opportunities',
-        'read_leads', 'update_leads', 'pdl_search', 'manage_users'
+        'admin', 'read_leads', 'update_leads', 'delete_leads', 'pdl_search',
+        'manage_contacts', 'manage_companies', 'manage_users'
       ],
-      sales: [
-        'create_contacts', 'read_contacts', 'update_contacts',
-        'create_companies', 'read_companies', 'update_companies',
-        'create_opportunities', 'read_opportunities', 'update_opportunities',
-        'read_leads', 'update_leads', 'pdl_search'
+      manager: [
+        'read_leads', 'update_leads', 'delete_leads', 'pdl_search',
+        'manage_contacts', 'manage_companies'
       ],
-      marketing: [
-        'read_contacts', 'update_contacts',
-        'read_companies', 'update_companies',
-        'read_opportunities', 'update_opportunities',
-        'read_leads', 'update_leads', 'pdl_search'
+      user: [
+        'read_leads', 'update_leads', 'pdl_search', 'manage_contacts'
       ],
       viewer: [
-        'read_contacts', 'read_companies', 'read_opportunities', 'read_leads'
+        'read_leads'
+      ],
+      sales_rep: [
+        'read_leads', 'update_leads', 'pdl_search', 'manage_contacts'
+      ],
+      analyst: [
+        'read_leads', 'manage_contacts'
       ]
     };
 
-    const userPermissions = rolePermissions[req.user.role] || [];
+    // Get permissions from role and individual user permissions
+    const rolePerms = rolePermissions[req.user.role] || [];
+    const userPerms = req.user.permissions || [];
+    const allPermissions = [...new Set([...rolePerms, ...userPerms])];
 
-    if (!userPermissions.includes(permission)) {
+    if (!allPermissions.includes(permission)) {
       return res.status(403).json({
         success: false,
         error: {
@@ -157,10 +159,10 @@ const optionalAuth = async (req, res, next) => {
     if (token) {
       const decoded = authService.verifyAccessToken(token);
       const user = await User.findByPk(decoded.id, {
-        attributes: { exclude: ['passwordHash'] }
+        attributes: { exclude: ['password'] }
       });
 
-      if (user && user.isActive) {
+      if (user && user.status === 'active') {
         req.user = user;
       }
     }

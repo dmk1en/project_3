@@ -8,30 +8,36 @@ router.use(authenticate);
 
 // Validation middleware
 const validateSearchQuery = (req, res, next) => {
+  console.log('PDL Validation: Request body:', req.body);
   const { name, queryConfig } = req.body;
   
   if (!name || !queryConfig) {
+    console.log('PDL Validation: Missing required fields - name:', !!name, 'queryConfig:', !!queryConfig);
     return res.status(400).json({
       success: false,
       error: {
         code: 'VALIDATION_ERROR',
-        message: 'Name and query configuration are required'
+        message: 'Name and query configuration are required',
+        received: { hasName: !!name, hasQueryConfig: !!queryConfig, fields: Object.keys(req.body) }
       }
     });
   }
 
   if (!queryConfig.jobTitles || !Array.isArray(queryConfig.jobTitles) || queryConfig.jobTitles.length === 0) {
+    console.log('PDL Validation: Invalid jobTitles:', queryConfig.jobTitles);
     return res.status(400).json({
       success: false,
       error: {
         code: 'VALIDATION_ERROR',
-        message: 'At least one job title is required in query configuration'
+        message: 'At least one job title is required in query configuration',
+        received: { queryConfig: queryConfig }
       }
     });
   }
 
+  console.log('PDL Validation: Passed validation');
   next();
-};
+}
 
 const validateBulkOperation = (req, res, next) => {
   const { leadIds, operation } = req.body;
@@ -94,6 +100,36 @@ router.post('/leads/:id/reject',
   pdlController.rejectLead
 );
 
+// POST /api/pdl/leads/:id/enrich - Manually enrich a lead (including PDL-sourced)
+router.post('/leads/:id/enrich', 
+  requirePermission('update_leads'), 
+  pdlController.enrichLead
+);
+
+// POST /api/pdl/leads/:id/enrich - Manually enrich a lead (including PDL-sourced)
+router.post('/leads/:id/enrich', 
+  requirePermission('update_leads'), 
+  pdlController.enrichLead
+);
+
+// POST /api/pdl/leads/manual - Create manual lead
+router.post('/leads/manual', 
+  requirePermission('create_leads'), 
+  pdlController.createManualLead
+);
+
+// PUT /api/pdl/leads/:id - Update lead information
+router.put('/leads/:id', 
+  requirePermission('update_leads'), 
+  pdlController.updateLead
+);
+
+// DELETE /api/pdl/leads/:id - Delete a lead
+router.delete('/leads/:id', 
+  requirePermission('update_leads'), 
+  pdlController.deleteLead
+);
+
 // POST /api/pdl/leads/bulk - Bulk operations on leads
 router.post('/leads/bulk', 
   requirePermission('update_leads'),
@@ -126,6 +162,12 @@ router.post('/queries',
 router.post('/queries/:id/run', 
   requirePermission('pdl_search'), 
   pdlController.runSearchQuery
+);
+
+// DELETE /api/pdl/queries/:id - Delete a saved search query
+router.delete('/queries/:id', 
+  requirePermission('update_leads'), 
+  pdlController.deleteSearchQuery
 );
 
 // API Usage and Statistics

@@ -31,39 +31,13 @@ import {
   UserOutlined,
   TeamOutlined
 } from '@ant-design/icons';
-import { api } from '../services/api';
+import { companyService, Company, CreateCompanyData } from '../services/companyService';
+import { useSelector } from 'react-redux';
+import { RootState } from '../store';
 
 const { Search } = Input;
 const { Option } = Select;
 const { Text } = Typography;
-
-interface Company {
-  id: number;
-  name: string;
-  industry?: string;
-  website?: string;
-  phone?: string;
-  email?: string;
-  address?: string;
-  city?: string;
-  state?: string;
-  country?: string;
-  zipCode?: string;
-  employees?: number;
-  revenue?: number;
-  description?: string;
-  tags?: string[];
-  contacts?: Contact[];
-  createdAt: string;
-}
-
-interface Contact {
-  id: number;
-  firstName: string;
-  lastName: string;
-  email: string;
-  jobTitle?: string;
-}
 
 const Companies: React.FC = () => {
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -73,17 +47,27 @@ const Companies: React.FC = () => {
   const [isDrawerVisible, setIsDrawerVisible] = useState(false);
   const [editingCompany, setEditingCompany] = useState<Company | null>(null);
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
+  const [pagination, setPagination] = useState({ current: 1, pageSize: 10, total: 0 });
   const [form] = Form.useForm();
 
   useEffect(() => {
     loadCompanies();
   }, []);
 
-  const loadCompanies = async () => {
+  const loadCompanies = async (page = 1, pageSize = 10) => {
     try {
       setLoading(true);
-      const response = await api.get('/companies');
+      const response = await companyService.getCompanies({
+        page,
+        limit: pageSize,
+        search: searchText || undefined
+      });
       setCompanies(response.data.companies || []);
+      setPagination({
+        current: page,
+        pageSize,
+        total: response.data.pagination?.totalItems || 0
+      });
     } catch (error) {
       console.error('Failed to load companies:', error);
       message.error('Failed to load companies');
@@ -103,25 +87,27 @@ const Companies: React.FC = () => {
     setIsModalVisible(true);
     form.setFieldsValue({
       name: company.name,
+      domain: company.domain,
       industry: company.industry,
+      size: company.size,
       website: company.website,
       phone: company.phone,
-      email: company.email,
-      address: company.address,
-      city: company.city,
-      state: company.state,
-      country: company.country,
-      zipCode: company.zipCode,
-      employees: company.employees,
-      revenue: company.revenue,
+      address: company.address?.street,
+      city: company.address?.city,
+      state: company.address?.state,
+      country: company.address?.country,
+      postalCode: company.address?.postalCode,
+      foundedYear: company.foundedYear,
       description: company.description,
+      linkedinUrl: company.linkedinUrl,
+      twitterHandle: company.twitterHandle,
     });
   };
 
   const handleViewCompany = async (company: Company) => {
     try {
       // Load company details with contacts
-      const response = await api.get(`/companies/${company.id}`);
+      const response = await companyService.getCompany(company.id);
       setSelectedCompany(response.data);
       setIsDrawerVisible(true);
     } catch (error) {
@@ -131,9 +117,9 @@ const Companies: React.FC = () => {
     }
   };
 
-  const handleDeleteCompany = async (companyId: number) => {
+  const handleDeleteCompany = async (companyId: string) => {
     try {
-      await api.delete(`/companies/${companyId}`);
+      await companyService.deleteCompany(companyId);
       message.success('Company deleted successfully');
       loadCompanies();
     } catch (error) {
@@ -144,27 +130,57 @@ const Companies: React.FC = () => {
 
   const handleModalSubmit = async (values: any) => {
     try {
-      const companyData = {
-        name: values.name,
-        industry: values.industry,
-        website: values.website,
-        phone: values.phone,
-        email: values.email,
-        address: values.address,
-        city: values.city,
-        state: values.state,
-        country: values.country,
-        zipCode: values.zipCode,
-        employees: values.employees,
-        revenue: values.revenue,
-        description: values.description,
+      // Filter out empty values and prepare address object
+      const companyData: any = {
+        name: values.name?.trim(),
       };
 
+      // Only add optional fields if they have values
+      if (values.domain?.trim()) companyData.domain = values.domain.trim();
+      if (values.industry) companyData.industry = values.industry;
+      if (values.size) companyData.size = values.size;
+      if (values.description?.trim()) companyData.description = values.description.trim();
+      if (values.phone?.trim()) companyData.phone = values.phone.trim();
+      
+      // Validate and add URLs
+      if (values.website?.trim()) {
+        const website = values.website.trim();
+        companyData.website = website.startsWith('http') ? website : `https://${website}`;
+      }
+      
+      if (values.linkedinUrl?.trim()) {
+        const linkedin = values.linkedinUrl.trim();
+        companyData.linkedinUrl = linkedin.startsWith('http') ? linkedin : `https://${linkedin}`;
+      }
+      
+      if (values.twitterHandle?.trim()) {
+        companyData.twitterHandle = values.twitterHandle.trim();
+      }
+
+      // Build address object if any address fields are provided
+      const addressFields = {
+        street: values.address?.trim(),
+        city: values.city?.trim(),
+        state: values.state?.trim(),
+        country: values.country?.trim(),
+        postalCode: values.postalCode?.trim()
+      };
+      
+      const hasAddressFields = Object.values(addressFields).some(field => field);
+      if (hasAddressFields) {
+        companyData.address = addressFields;
+      }
+
+      // Add numeric fields if provided
+      if (values.foundedYear && !isNaN(values.foundedYear)) {
+        companyData.foundedYear = parseInt(values.foundedYear);
+      }
+
       if (editingCompany) {
-        await api.put(`/companies/${editingCompany.id}`, companyData);
+        await companyService.updateCompany(editingCompany.id, companyData);
         message.success('Company updated successfully');
       } else {
-        await api.post('/companies', companyData);
+        await companyService.createCompany(companyData);
         message.success('Company created successfully');
       }
 
@@ -177,11 +193,16 @@ const Companies: React.FC = () => {
     }
   };
 
-  const filteredCompanies = companies.filter(company =>
-    company.name.toLowerCase().includes(searchText.toLowerCase()) ||
-    company.industry?.toLowerCase().includes(searchText.toLowerCase()) ||
-    company.city?.toLowerCase().includes(searchText.toLowerCase())
-  );
+  // Handle search with debouncing
+  const handleSearch = (value: string) => {
+    setSearchText(value);
+    // Reload data when search changes
+    setTimeout(() => loadCompanies(1, pagination.pageSize), 500);
+  };
+
+  const handleTableChange = (paginationProps: any) => {
+    loadCompanies(paginationProps.current, paginationProps.pageSize);
+  };
 
   const formatCurrency = (amount?: number) => {
     if (!amount) return '-';
@@ -201,12 +222,26 @@ const Companies: React.FC = () => {
     return count.toString();
   };
 
-  const getCompanySizeTag = (employees?: number) => {
-    if (!employees) return null;
-    if (employees < 50) return <Tag color="green">Startup</Tag>;
-    if (employees < 500) return <Tag color="blue">SMB</Tag>;
-    if (employees < 5000) return <Tag color="orange">Mid-Market</Tag>;
-    return <Tag color="red">Enterprise</Tag>;
+  const getCompanySizeTag = (company: Company) => {
+    if (company.size) {
+      const sizeColors = {
+        startup: 'green',
+        small: 'blue', 
+        medium: 'cyan',
+        large: 'orange',
+        enterprise: 'red'
+      };
+      const sizeLabels = {
+        startup: 'Startup',
+        small: 'Small',
+        medium: 'Medium', 
+        large: 'Large',
+        enterprise: 'Enterprise'
+      };
+      return <Tag color={sizeColors[company.size]}>{sizeLabels[company.size]}</Tag>;
+    }
+    
+    return null;
   };
 
   const columns = [
@@ -232,10 +267,10 @@ const Companies: React.FC = () => {
       key: 'contact',
       render: (company: Company) => (
         <div>
-          {company.email && (
+          {company.domain && (
             <div style={{ marginBottom: '4px' }}>
               <MailOutlined style={{ marginRight: '8px', color: '#1890ff' }} />
-              {company.email}
+              {company.domain}
             </div>
           )}
           {company.phone && (
@@ -259,9 +294,12 @@ const Companies: React.FC = () => {
       title: 'Location',
       key: 'location',
       render: (company: Company) => {
-        const location = [company.city, company.state, company.country]
-          .filter(Boolean)
-          .join(', ');
+        const addressParts = [];
+        if (company.address?.city) addressParts.push(company.address.city);
+        if (company.address?.state) addressParts.push(company.address.state);
+        if (company.address?.country) addressParts.push(company.address.country);
+        
+        const location = addressParts.join(', ');
         return location || '-';
       },
     },
@@ -270,16 +308,9 @@ const Companies: React.FC = () => {
       key: 'size',
       render: (company: Company) => (
         <div>
-          <div>{formatEmployees(company.employees)} employees</div>
-          {getCompanySizeTag(company.employees)}
+          {getCompanySizeTag(company)}
         </div>
       ),
-    },
-    {
-      title: 'Revenue',
-      dataIndex: 'revenue',
-      key: 'revenue',
-      render: (revenue: number) => formatCurrency(revenue),
     },
     {
       title: 'Actions',
@@ -323,9 +354,11 @@ const Companies: React.FC = () => {
           <Space>
             <Search
               placeholder="Search companies..."
-              onChange={(e) => setSearchText(e.target.value)}
+              onSearch={handleSearch}
+              onChange={(e) => handleSearch(e.target.value)}
               style={{ width: 300 }}
               prefix={<SearchOutlined />}
+              allowClear
             />
             <Button 
               type="primary" 
@@ -339,13 +372,16 @@ const Companies: React.FC = () => {
       >
         <Table
           columns={columns}
-          dataSource={filteredCompanies}
+          dataSource={companies}
+          pagination={{
+            ...pagination,
+            showSizeChanger: true,
+            showQuickJumper: true,
+            showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} companies`
+          }}
+          onChange={handleTableChange}
           rowKey="id"
           loading={loading}
-          pagination={{
-            pageSize: 10,
-            showTotal: (total) => `Total ${total} companies`,
-          }}
         />
       </Card>
 
@@ -389,6 +425,25 @@ const Companies: React.FC = () => {
 
           <Row gutter={16}>
             <Col span={12}>
+              <Form.Item name="size" label="Company Size">
+                <Select placeholder="Select company size" allowClear>
+                  <Option value="startup">Startup</Option>
+                  <Option value="small">Small (1-50)</Option>
+                  <Option value="medium">Medium (51-500)</Option>
+                  <Option value="large">Large (501-5000)</Option>
+                  <Option value="enterprise">Enterprise (5000+)</Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="foundedYear" label="Founded Year">
+                <Input type="number" placeholder="Enter founded year" />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col span={12}>
               <Form.Item
                 name="email"
                 label="Email"
@@ -404,9 +459,18 @@ const Companies: React.FC = () => {
             </Col>
           </Row>
 
-          <Form.Item name="website" label="Website">
-            <Input placeholder="https://example.com" />
-          </Form.Item>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="website" label="Website">
+                <Input placeholder="https://example.com" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="domain" label="Domain">
+                <Input placeholder="example.com" />
+              </Form.Item>
+            </Col>
+          </Row>
 
           <Form.Item name="address" label="Address">
             <Input placeholder="Enter street address" />
@@ -432,18 +496,26 @@ const Companies: React.FC = () => {
 
           <Row gutter={16}>
             <Col span={8}>
-              <Form.Item name="zipCode" label="ZIP Code">
+              <Form.Item name="postalCode" label="ZIP Code">
                 <Input placeholder="Enter ZIP code" />
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item name="employees" label="Number of Employees">
-                <Input type="number" placeholder="Enter employee count" />
+              <Form.Item name="foundedYear" label="Founded Year">
+                <Input type="number" placeholder="Enter founded year" />
               </Form.Item>
             </Col>
-            <Col span={8}>
-              <Form.Item name="revenue" label="Annual Revenue">
-                <Input type="number" placeholder="Enter revenue" />
+          </Row>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="linkedinUrl" label="LinkedIn URL">
+                <Input placeholder="https://linkedin.com/company/example" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="twitterHandle" label="Twitter Handle">
+                <Input placeholder="@companyname" />
               </Form.Item>
             </Col>
           </Row>
@@ -483,17 +555,17 @@ const Companies: React.FC = () => {
               <div style={{ marginTop: '12px' }}>
                 <h3>{selectedCompany.name}</h3>
                 <p style={{ color: '#666' }}>{selectedCompany.industry}</p>
-                {getCompanySizeTag(selectedCompany.employees)}
+                {getCompanySizeTag(selectedCompany)}
               </div>
             </div>
 
             <Divider />
 
             <Space direction="vertical" style={{ width: '100%' }}>
-              {selectedCompany.email && (
+              {selectedCompany.domain && (
                 <div>
-                  <strong>Email:</strong>
-                  <div>{selectedCompany.email}</div>
+                  <strong>Domain:</strong>
+                  <div>{selectedCompany.domain}</div>
                 </div>
               )}
 
@@ -515,32 +587,43 @@ const Companies: React.FC = () => {
                 </div>
               )}
 
-              {(selectedCompany.address || selectedCompany.city) && (
+              {selectedCompany.address && (
                 <div>
                   <strong>Address:</strong>
                   <div>
-                    {selectedCompany.address && <div>{selectedCompany.address}</div>}
+                    {selectedCompany.address.street && <div>{selectedCompany.address.street}</div>}
                     <div>
-                      {[selectedCompany.city, selectedCompany.state, selectedCompany.zipCode]
+                      {[selectedCompany.address.city, selectedCompany.address.state, selectedCompany.address.postalCode]
                         .filter(Boolean)
                         .join(', ')}
                     </div>
-                    {selectedCompany.country && <div>{selectedCompany.country}</div>}
+                    {selectedCompany.address.country && <div>{selectedCompany.address.country}</div>}
                   </div>
                 </div>
               )}
 
-              {selectedCompany.employees && (
+              {selectedCompany.foundedYear && (
                 <div>
-                  <strong>Employees:</strong>
-                  <div>{formatEmployees(selectedCompany.employees)}</div>
+                  <strong>Founded:</strong>
+                  <div>{selectedCompany.foundedYear}</div>
                 </div>
               )}
 
-              {selectedCompany.revenue && (
+              {selectedCompany.linkedinUrl && (
                 <div>
-                  <strong>Annual Revenue:</strong>
-                  <div>{formatCurrency(selectedCompany.revenue)}</div>
+                  <strong>LinkedIn:</strong>
+                  <div>
+                    <a href={selectedCompany.linkedinUrl} target="_blank" rel="noopener noreferrer">
+                      {selectedCompany.linkedinUrl}
+                    </a>
+                  </div>
+                </div>
+              )}
+
+              {selectedCompany.twitterHandle && (
+                <div>
+                  <strong>Twitter:</strong>
+                  <div>{selectedCompany.twitterHandle}</div>
                 </div>
               )}
 
@@ -557,35 +640,7 @@ const Companies: React.FC = () => {
               </div>
             </Space>
 
-            {selectedCompany.contacts && selectedCompany.contacts.length > 0 && (
-              <>
-                <Divider />
-                <div>
-                  <strong style={{ display: 'flex', alignItems: 'center', marginBottom: '12px' }}>
-                    <TeamOutlined style={{ marginRight: '8px' }} />
-                    Contacts ({selectedCompany.contacts.length})
-                  </strong>
-                  <List
-                    size="small"
-                    dataSource={selectedCompany.contacts}
-                    renderItem={(contact) => (
-                      <List.Item>
-                        <List.Item.Meta
-                          avatar={<Avatar size="small" icon={<UserOutlined />} />}
-                          title={`${contact.firstName} ${contact.lastName}`}
-                          description={
-                            <>
-                              <div>{contact.jobTitle}</div>
-                              <Text type="secondary">{contact.email}</Text>
-                            </>
-                          }
-                        />
-                      </List.Item>
-                    )}
-                  />
-                </div>
-              </>
-            )}
+            {/* TODO: Add contacts section when contact-company relationship is implemented */}
 
             <Divider />
 

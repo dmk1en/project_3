@@ -28,8 +28,11 @@ import {
   LinkedinOutlined,
   TwitterOutlined
 } from '@ant-design/icons';
-import { api } from '../services/api';
 import { contactService, Contact as ServiceContact, CreateContactData } from '../services/contactService';
+import { companyService, Company } from '../services/companyService';
+import { useSelector } from 'react-redux';
+import { RootState } from '../store';
+import { getErrorMessage } from '../utils/errorUtils';
 
 const { Search } = Input;
 const { Option } = Select;
@@ -37,25 +40,26 @@ const { Option } = Select;
 // Use the Contact interface from the service
 type Contact = ServiceContact;
 
-interface Company {
+interface User {
   id: string;
-  name: string;
-  industry?: string;
-  size?: string;
-}
-
-interface CompaniesResponse {
-  success: boolean;
-  data: {
-    companies: Company[];
-  };
+  firstName: string;
+  lastName: string;
+  email: string;
+  role: string;
 }
 
 const Contacts: React.FC = () => {
+  const auth = useSelector((state: RootState) => state.auth);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchText, setSearchText] = useState('');
+  const [filters, setFilters] = useState({
+    leadStatus: undefined as string | undefined,
+    source: undefined as string | undefined,
+    assignedTo: undefined as string | undefined,
+  });
   const [pagination, setPagination] = useState({
     current: 1,
     pageSize: 10,
@@ -71,15 +75,23 @@ const Contacts: React.FC = () => {
   useEffect(() => {
     loadContacts(1, 10);
     loadCompanies();
+    loadUsers();
   }, []);
+
+  useEffect(() => {
+    loadContacts(1, pagination.pageSize, searchText);
+  }, [filters]);
 
   const loadContacts = async (page: number = 1, limit: number = 10, search?: string) => {
     try {
       setLoading(true);
-      const filters = { page, limit };
-      if (search) (filters as any).search = search;
+      const filterParams = { page, limit };
+      if (search) (filterParams as any).search = search;
+      if (filters.leadStatus) (filterParams as any).leadStatus = filters.leadStatus;
+      if (filters.source) (filterParams as any).source = filters.source;
+      if (filters.assignedTo) (filterParams as any).assignedTo = filters.assignedTo;
       
-      const response = await contactService.getContacts(filters);
+      const response = await contactService.getContacts(filterParams);
       
       if (response.success) {
         setContacts(response.data.contacts);
@@ -91,7 +103,7 @@ const Contacts: React.FC = () => {
       }
     } catch (error: any) {
       console.error('Failed to load contacts:', error);
-      message.error(error.response?.data?.error?.message || 'Failed to load contacts');
+      message.error(getErrorMessage(error, 'Failed to load contacts'));
     } finally {
       setLoading(false);
     }
@@ -99,15 +111,32 @@ const Contacts: React.FC = () => {
 
   const loadCompanies = async () => {
     try {
-      console.log('Loading companies with api baseURL:', api.defaults.baseURL);
-      const response = await api.get<CompaniesResponse>('/companies');
-      console.log('Companies response:', response);
-      if (response.data.success) {
-        setCompanies(response.data.data.companies);
+      const response = await companyService.getCompanies({ limit: 100 });
+      
+      if (response.success) {
+        setCompanies(response.data.companies);
       }
     } catch (error: any) {
       console.error('Failed to load companies:', error);
-      message.error(error.response?.data?.error?.message || 'Failed to load companies');
+      message.error(getErrorMessage(error, 'Failed to load companies'));
+    }
+  };
+
+  const loadUsers = async () => {
+    try {
+      // For now, just add the current user to the list
+      // In a full implementation, you'd have a users API endpoint
+      if (auth.user) {
+        setUsers([{
+          id: auth.user.id,
+          firstName: auth.user.firstName,
+          lastName: auth.user.lastName,
+          email: auth.user.email,
+          role: auth.user.role
+        }]);
+      }
+    } catch (error: any) {
+      console.error('Failed to load users:', error);
     }
   };
 
@@ -128,9 +157,8 @@ const Contacts: React.FC = () => {
       lastName: contact.lastName,
       email: contact.email,
       phone: contact.phone,
-      jobTitle: contact.jobTitle,
+      title: contact.title,
       department: contact.department,
-      seniorityLevel: contact.seniorityLevel,
       companyId: contact.companyId,
       linkedinUrl: contact.linkedinUrl,
       twitterHandle: contact.twitterHandle,
@@ -155,7 +183,7 @@ const Contacts: React.FC = () => {
       loadContacts(pagination.current, pagination.pageSize, searchText);
     } catch (error: any) {
       console.error('Failed to delete contact:', error);
-      message.error(error.response?.data?.error?.message || 'Failed to delete contact');
+      message.error(getErrorMessage(error, 'Failed to delete contact'));
     }
   };
 
@@ -166,9 +194,9 @@ const Contacts: React.FC = () => {
         lastName: values.lastName,
         email: values.email,
         phone: values.phone,
-        jobTitle: values.jobTitle,
+        title: values.title,
         department: values.department,
-        seniorityLevel: values.seniorityLevel,
+
         companyId: values.companyId,
         linkedinUrl: values.linkedinUrl,
         twitterHandle: values.twitterHandle,
@@ -219,10 +247,10 @@ const Contacts: React.FC = () => {
           const validationErrors = error.response.data.error.details.map((err: any) => `${err.field}: ${err.message}`).join(', ');
           message.error(`Validation errors: ${validationErrors}`);
         } else {
-          message.error(error.response?.data?.error?.message || 'Validation failed');
+          message.error(getErrorMessage(error, 'Validation failed'));
         }
       } else {
-        message.error(error.response?.data?.error?.message || 'Failed to save contact');
+        message.error(getErrorMessage(error, 'Failed to save contact'));
       }
     }
   };
@@ -231,7 +259,7 @@ const Contacts: React.FC = () => {
     `${contact.firstName} ${contact.lastName}`.toLowerCase().includes(searchText.toLowerCase()) ||
     contact.email?.toLowerCase().includes(searchText.toLowerCase()) ||
     contact.company?.name?.toLowerCase().includes(searchText.toLowerCase()) ||
-    contact.jobTitle?.toLowerCase().includes(searchText.toLowerCase())
+    contact.title?.toLowerCase().includes(searchText.toLowerCase())
   );
 
   const columns = [
@@ -246,7 +274,7 @@ const Contacts: React.FC = () => {
               {contact.firstName} {contact.lastName}
             </div>
             <div style={{ color: '#666', fontSize: '12px' }}>
-              {contact.jobTitle}
+              {contact.title}
             </div>
           </div>
         </Space>
@@ -377,6 +405,69 @@ const Contacts: React.FC = () => {
           </Space>
         }
       >
+        {/* Filters */}
+        <div style={{ marginBottom: 16 }}>
+          <Row gutter={16}>
+            <Col span={6}>
+              <Select
+                placeholder="Filter by Lead Status"
+                allowClear
+                value={filters.leadStatus || undefined}
+                onChange={(value) => setFilters(prev => ({ ...prev, leadStatus: value }))}
+                style={{ width: '100%' }}
+              >
+                <Option value="new">New</Option>
+                <Option value="contacted">Contacted</Option>
+                <Option value="qualified">Qualified</Option>
+                <Option value="proposal">Proposal</Option>
+                <Option value="negotiation">Negotiation</Option>
+                <Option value="closed">Closed</Option>
+                <Option value="lost">Lost</Option>
+              </Select>
+            </Col>
+            <Col span={6}>
+              <Select
+                placeholder="Filter by Source"
+                allowClear
+                value={filters.source || undefined}
+                onChange={(value) => setFilters(prev => ({ ...prev, source: value }))}
+                style={{ width: '100%' }}
+              >
+                <Option value="website">Website</Option>
+                <Option value="social_media">Social Media</Option>
+                <Option value="email_campaign">Email Campaign</Option>
+                <Option value="referral">Referral</Option>
+                <Option value="cold_call">Cold Call</Option>
+                <Option value="trade_show">Trade Show</Option>
+                <Option value="partner">Partner</Option>
+                <Option value="other">Other</Option>
+              </Select>
+            </Col>
+            <Col span={6}>
+              <Select
+                placeholder="Filter by Assigned User"
+                allowClear
+                value={filters.assignedTo || undefined}
+                onChange={(value) => setFilters(prev => ({ ...prev, assignedTo: value }))}
+                style={{ width: '100%' }}
+              >
+                {users.map(user => (
+                  <Option key={user.id} value={user.id}>
+                    {user.firstName} {user.lastName}
+                  </Option>
+                ))}
+              </Select>
+            </Col>
+            <Col span={6}>
+              <Button 
+                onClick={() => setFilters({ leadStatus: undefined, source: undefined, assignedTo: undefined })}
+              >
+                Clear Filters
+              </Button>
+            </Col>
+          </Row>
+        </div>
+
         <Table
           columns={columns}
           dataSource={filteredContacts}
@@ -455,7 +546,7 @@ const Contacts: React.FC = () => {
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="jobTitle" label="Job Title">
+              <Form.Item name="title" label="Job Title">
                 <Input placeholder="Enter job title" />
               </Form.Item>
             </Col>
@@ -468,14 +559,13 @@ const Contacts: React.FC = () => {
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="seniorityLevel" label="Seniority Level">
-                <Select placeholder="Select seniority level" allowClear>
-                  <Option value="entry">Entry Level</Option>
-                  <Option value="mid">Mid Level</Option>
-                  <Option value="senior">Senior Level</Option>
-                  <Option value="director">Director</Option>
-                  <Option value="vp">Vice President</Option>
-                  <Option value="c_level">C-Level</Option>
+              <Form.Item name="assignedTo" label="Assigned To">
+                <Select placeholder="Select user" allowClear>
+                  {users.map(user => (
+                    <Option key={user.id} value={user.id}>
+                      {user.firstName} {user.lastName} ({user.role})
+                    </Option>
+                  ))}
                 </Select>
               </Form.Item>
             </Col>
@@ -576,7 +666,7 @@ const Contacts: React.FC = () => {
               <Avatar size={80} icon={<UserOutlined />} />
               <div style={{ marginTop: '12px' }}>
                 <h3>{selectedContact.firstName} {selectedContact.lastName}</h3>
-                <p style={{ color: '#666' }}>{selectedContact.jobTitle}</p>
+                <p style={{ color: '#666' }}>{selectedContact.title}</p>
               </div>
             </div>
 
