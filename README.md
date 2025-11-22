@@ -1,8 +1,14 @@
-# 🚀 CRM Consulting Platform
+``# 🚀 CRM Consulting Platform
 
 A comprehensive Customer Relationship Management system with social media integration, designed for modern consulting businesses to discover, track, and convert leads effectively.
 
 ![CRM Dashboard Demo](./docs/image.png)
+
+# Demo Video
+
+<video controls width="100%">
+    <source src="docs/demo.mp4" type="video/mp4">
+</video>
 
 ## 📋 Table of Contents
 
@@ -327,5 +333,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Designed for scalability and performance
 
 ---
+
 
 **🚀 Ready to revolutionize your customer relationship management? Get started today!**
