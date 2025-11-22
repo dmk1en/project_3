@@ -7,7 +7,7 @@ A comprehensive Customer Relationship Management system with social media integr
 # Demo Video
 
 <video controls width="100%">
-    <source src="docs/demo.mp4" type="video/mp4">
+    <source src="./docs/demo.mp4" type="video/mp4">
 </video>
 
 ## 📋 Table of Contents
@@ -336,3 +336,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 
 **🚀 Ready to revolutionize your customer relationship management? Get started today!**
+
