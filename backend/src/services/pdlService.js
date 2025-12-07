@@ -1,5 +1,6 @@
 const axios = require('axios');
-const { PotentialLead, PdlSearchQuery } = require('../models');
+const { PotentialLead, PdlSearchQuery, Contact, Company } = require('../models');
+const { Op } = require('sequelize');
 
 class PDLService {
   constructor() {
@@ -394,6 +395,775 @@ class PDLService {
         error: error.response?.data?.error || error.message
       };
     }
+  }
+
+  /**
+   * Find potential matches between contacts and PDL leads
+   */
+  async findContactMatches(leadId) {
+    try {
+      const lead = await PotentialLead.findByPk(leadId);
+      if (!lead) {
+        throw new Error('Lead not found');
+      }
+
+      const matches = [];
+      const leadData = lead.rawData || {};
+      
+      // Extract name parts for matching
+      const leadNames = this.extractNameVariations(lead.fullName);
+      const leadSkills = leadData.skills || [];
+      const leadTitle = lead.jobTitle?.toLowerCase() || '';
+      const leadCompany = lead.companyName?.toLowerCase() || '';
+      const leadEmail = lead.email?.toLowerCase() || '';
+      const leadLinkedin = lead.linkedinUrl || '';
+
+      // Find contacts with similar characteristics
+      const contacts = await Contact.findAll({
+        include: [{
+          model: require('../models/Company'),
+          as: 'company',
+          required: false
+        }]
+      });
+
+      for (const contact of contacts) {
+        const matchScore = this.calculateMatchScore({
+          lead: {
+            names: leadNames,
+            skills: leadSkills,
+            title: leadTitle,
+            company: leadCompany,
+            email: leadEmail,
+            linkedin: leadLinkedin
+          },
+          contact: {
+            firstName: contact.firstName?.toLowerCase() || '',
+            lastName: contact.lastName?.toLowerCase() || '',
+            title: contact.jobTitle?.toLowerCase() || '',
+            company: contact.company?.name?.toLowerCase() || '',
+            email: contact.email?.toLowerCase() || '',
+            linkedin: contact.linkedinUrl || '',
+            customFields: contact.customFields || {}
+          }
+        });
+
+        if (matchScore >= 60) { // Only include matches with 60%+ similarity
+          matches.push({
+            contact,
+            matchScore,
+            matchReasons: this.getMatchReasons({
+              lead: { names: leadNames, skills: leadSkills, title: leadTitle, company: leadCompany, email: leadEmail, linkedin: leadLinkedin },
+              contact: {
+                firstName: contact.firstName?.toLowerCase(),
+                lastName: contact.lastName?.toLowerCase(),
+                title: contact.jobTitle?.toLowerCase(),
+                company: contact.company?.name?.toLowerCase(),
+                email: contact.email?.toLowerCase(),
+                linkedin: contact.linkedinUrl,
+                customFields: contact.customFields || {}
+              }
+            })
+          });
+        }
+      }
+
+      // Sort by match score descending
+      matches.sort((a, b) => b.matchScore - a.matchScore);
+
+      return {
+        success: true,
+        lead,
+        matches: matches.slice(0, 10) // Return top 10 matches
+      };
+
+    } catch (error) {
+      console.error('Find contact matches error:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Extract name variations for better matching
+   */
+  extractNameVariations(fullName) {
+    if (!fullName) return [];
+    
+    const normalized = fullName.toLowerCase().trim();
+    const parts = normalized.split(/\s+/);
+    const variations = [normalized];
+    
+    if (parts.length >= 2) {
+      // First Last
+      variations.push(`${parts[0]} ${parts[parts.length - 1]}`);
+      // Last, First
+      variations.push(`${parts[parts.length - 1]}, ${parts[0]}`);
+      // Individual parts
+      variations.push(...parts);
+    }
+    
+    return [...new Set(variations)];
+  }
+
+  /**
+   * Calculate match score between lead and contact
+   */
+  calculateMatchScore({ lead, contact }) {
+    let score = 0;
+    let factors = 0;
+
+    // Handle both directions: lead->contact and contact->lead
+    const leadNames = lead.names || this.extractNameVariations(lead.fullName || '');
+    const contactFirstName = contact.firstName || '';
+    const contactLastName = contact.lastName || '';
+    const contactFullName = `${contactFirstName} ${contactLastName}`.trim();
+
+    // Name matching (40% weight)
+    let nameMatch = 0;
+    if (leadNames.length > 0 && contactFullName) {
+      nameMatch = this.calculateNameMatch(leadNames, contactFirstName, contactLastName);
+    }
+    score += nameMatch * 40;
+    factors += 40;
+
+    // Email matching (25% weight) - exact match
+    if (lead.email && contact.email && lead.email === contact.email) {
+      score += 25;
+    }
+    factors += 25;
+
+    // LinkedIn URL matching (20% weight)
+    if (lead.linkedin && contact.linkedin) {
+      const linkedinMatch = this.calculateLinkedInMatch(lead.linkedin, contact.linkedin);
+      score += linkedinMatch * 20;
+    }
+    factors += 20;
+
+    // Job title similarity (10% weight)
+    if (lead.title && contact.title) {
+      const titleSimilarity = this.calculateStringSimilarity(lead.title, contact.title);
+      score += titleSimilarity * 10;
+    }
+    factors += 10;
+
+    // Company matching (5% weight)
+    if (lead.company && contact.company) {
+      const companySimilarity = this.calculateStringSimilarity(lead.company, contact.company);
+      score += companySimilarity * 5;
+    }
+    factors += 5;
+
+    return Math.round((score / factors) * 100);
+  }
+
+  /**
+   * Calculate name matching score
+   */
+  calculateNameMatch(leadNames, contactFirstName, contactLastName) {
+    if (!leadNames.length || (!contactFirstName && !contactLastName)) return 0;
+    
+    const contactFullName = `${contactFirstName || ''} ${contactLastName || ''}`.trim().toLowerCase();
+    const contactReverseName = `${contactLastName || ''} ${contactFirstName || ''}`.trim().toLowerCase();
+    
+    let bestMatch = 0;
+    
+    for (const leadName of leadNames) {
+      // Exact match
+      if (leadName === contactFullName || leadName === contactReverseName) {
+        return 1.0;
+      }
+      
+      // Partial matches
+      const similarity1 = this.calculateStringSimilarity(leadName, contactFullName);
+      const similarity2 = this.calculateStringSimilarity(leadName, contactReverseName);
+      const maxSimilarity = Math.max(similarity1, similarity2);
+      
+      bestMatch = Math.max(bestMatch, maxSimilarity);
+    }
+    
+    return bestMatch;
+  }
+
+  /**
+   * Calculate LinkedIn URL matching
+   */
+  calculateLinkedInMatch(leadLinkedIn, contactLinkedIn) {
+    if (!leadLinkedIn || !contactLinkedIn) return 0;
+    
+    // Extract profile identifiers from LinkedIn URLs
+    const extractProfileId = (url) => {
+      const match = url.match(/linkedin\.com\/in\/([^\/\?]+)/);
+      return match ? match[1].toLowerCase() : '';
+    };
+    
+    const leadProfile = extractProfileId(leadLinkedIn);
+    const contactProfile = extractProfileId(contactLinkedIn);
+    
+    if (leadProfile && contactProfile) {
+      return leadProfile === contactProfile ? 1.0 : 0;
+    }
+    
+    return 0;
+  }
+
+  /**
+   * Calculate string similarity using Jaro-Winkler algorithm approximation
+   */
+  calculateStringSimilarity(str1, str2) {
+    if (!str1 || !str2) return 0;
+    if (str1 === str2) return 1;
+    
+    const longer = str1.length > str2.length ? str1 : str2;
+    const shorter = str1.length > str2.length ? str2 : str1;
+    
+    if (longer.length === 0) return 1;
+    
+    const editDistance = this.levenshteinDistance(str1, str2);
+    return (longer.length - editDistance) / longer.length;
+  }
+
+  /**
+   * Calculate Levenshtein distance
+   */
+  levenshteinDistance(str1, str2) {
+    const matrix = [];
+    
+    for (let i = 0; i <= str2.length; i++) {
+      matrix[i] = [i];
+    }
+    
+    for (let j = 0; j <= str1.length; j++) {
+      matrix[0][j] = j;
+    }
+    
+    for (let i = 1; i <= str2.length; i++) {
+      for (let j = 1; j <= str1.length; j++) {
+        if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+          matrix[i][j] = matrix[i - 1][j - 1];
+        } else {
+          matrix[i][j] = Math.min(
+            matrix[i - 1][j - 1] + 1,
+            matrix[i][j - 1] + 1,
+            matrix[i - 1][j] + 1
+          );
+        }
+      }
+    }
+    
+    return matrix[str2.length][str1.length];
+  }
+
+  /**
+   * Get human-readable match reasons
+   */
+  getMatchReasons({ lead, contact }) {
+    const reasons = [];
+    
+    // Name matching
+    const nameMatch = this.calculateNameMatch(lead.names, contact.firstName, contact.lastName);
+    if (nameMatch > 0.8) {
+      reasons.push('Strong name match');
+    } else if (nameMatch > 0.6) {
+      reasons.push('Partial name match');
+    }
+    
+    // Email match
+    if (lead.email && contact.email && lead.email === contact.email) {
+      reasons.push('Same email address');
+    }
+    
+    // LinkedIn match
+    if (lead.linkedin && contact.linkedin) {
+      const linkedinMatch = this.calculateLinkedInMatch(lead.linkedin, contact.linkedin);
+      if (linkedinMatch === 1.0) {
+        reasons.push('Same LinkedIn profile');
+      }
+    }
+    
+    // Job title similarity
+    if (lead.title && contact.title) {
+      const titleSimilarity = this.calculateStringSimilarity(lead.title, contact.title);
+      if (titleSimilarity > 0.7) {
+        reasons.push('Similar job title');
+      }
+    }
+    
+    // Company similarity
+    if (lead.company && contact.company) {
+      const companySimilarity = this.calculateStringSimilarity(lead.company, contact.company);
+      if (companySimilarity > 0.8) {
+        reasons.push('Same or similar company');
+      }
+    }
+    
+    return reasons;
+  }
+
+  /**
+   * Find potential PDL lead matches for a contact
+   */
+  async findLeadMatches(contact) {
+    try {
+      const matches = [];
+      const contactData = {
+        firstName: contact.firstName?.toLowerCase() || '',
+        lastName: contact.lastName?.toLowerCase() || '',
+        email: contact.email?.toLowerCase() || '',
+        title: contact.jobTitle?.toLowerCase() || '',
+        company: contact.company?.name?.toLowerCase() || '',
+        linkedin: contact.linkedinUrl || '',
+        customFields: contact.customFields || {}
+      };
+
+      // Extract name variations for matching
+      const contactNames = this.extractNameVariations(`${contact.firstName} ${contact.lastName}`);
+      const contactSkills = contactData.customFields.skills || [];
+
+      // Find PDL leads with similar characteristics
+      const leads = await PotentialLead.findAll({
+        where: {
+          status: {
+            [Op.in]: ['pending_review']
+          }
+        }
+      });
+
+      for (const lead of leads) {
+        const leadData = lead.rawData || {};
+        const leadNames = this.extractNameVariations(lead.fullName);
+        const leadSkills = leadData.skills || lead.skills || [];
+        const leadTitle = lead.jobTitle?.toLowerCase() || '';
+        const leadCompany = lead.companyName?.toLowerCase() || '';
+        const leadEmail = lead.email?.toLowerCase() || '';
+        const leadLinkedin = lead.linkedinUrl || '';
+
+        const matchScore = this.calculateMatchScore({
+          contact: contactData,
+          lead: {
+            names: leadNames,
+            skills: leadSkills,
+            title: leadTitle,
+            company: leadCompany,
+            email: leadEmail,
+            linkedin: leadLinkedin
+          }
+        });
+
+        if (matchScore >= 60) { // Only include matches with 60%+ similarity
+          matches.push({
+            lead,
+            matchScore,
+            matchReasons: this.getMatchReasons({
+              contact: contactData,
+              lead: { names: leadNames, skills: leadSkills, title: leadTitle, company: leadCompany, email: leadEmail, linkedin: leadLinkedin }
+            })
+          });
+        }
+      }
+
+      // Sort by match score descending
+      matches.sort((a, b) => b.matchScore - a.matchScore);
+
+      return {
+        success: true,
+        contact,
+        matches: matches.slice(0, 10).map(m => m.lead) // Return top 10 matches, just the leads
+      };
+
+    } catch (error) {
+      console.error('Find lead matches error:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Enrich contact with lead data
+   */
+  async enrichContact(contactId, leadId, selectedFields = []) {
+    try {
+      const contact = await Contact.findByPk(contactId);
+      const lead = await PotentialLead.findByPk(leadId);
+      
+      if (!contact) {
+        throw new Error('Contact not found');
+      }
+      
+      if (!lead) {
+        throw new Error('Lead not found');
+      }
+      
+      const leadData = lead.rawData || {};
+      const enrichmentData = {};
+      const enrichmentLog = [];
+      
+      // Define available enrichment fields
+      const fieldMappings = {
+        phone: { 
+          leadField: 'phone', 
+          contactField: 'phone',
+          leadValue: lead.phone || leadData.phone_numbers?.[0]?.number
+        },
+        email: {
+          leadField: 'email',
+          contactField: 'email', 
+          leadValue: lead.email || leadData.emails?.[0]?.address
+        },
+        jobTitle: {
+          leadField: 'jobTitle',
+          contactField: 'jobTitle',
+          leadValue: lead.jobTitle
+        },
+        linkedinUrl: {
+          leadField: 'linkedinUrl', 
+          contactField: 'linkedinUrl',
+          leadValue: lead.linkedinUrl
+        },
+        skills: {
+          leadField: 'skills',
+          contactField: 'customFields.skills',
+          leadValue: leadData.skills || lead.skills || []
+        },
+        education: {
+          leadField: 'education',
+          contactField: 'customFields.education',
+          leadValue: leadData.education || []
+        },
+        experience: {
+          leadField: 'experience', 
+          contactField: 'customFields.experience',
+          leadValue: leadData.experience || []
+        },
+        location: {
+          leadField: 'location',
+          contactField: 'customFields.location',
+          leadValue: lead.location || `${lead.locationCity || ''}, ${lead.locationCountry || ''}`.trim().replace(/^,\s*|,\s*$/g, '')
+        },
+        industry: {
+          leadField: 'industry',
+          contactField: 'customFields.industry',
+          leadValue: lead.industry || leadData.industry
+        },
+        companyName: {
+          leadField: 'companyName',
+          contactField: 'customFields.currentCompany',
+          leadValue: lead.companyName
+        },
+        seniorityLevel: {
+          leadField: 'seniorityLevel',
+          contactField: 'seniorityLevel',
+          leadValue: this.deriveSeniorityLevel(lead.jobTitle)
+        },
+        socialProfiles: {
+          leadField: 'socialProfiles',
+          contactField: 'customFields.socialProfiles',
+          leadValue: this.extractSocialProfiles(leadData)
+        },
+        certifications: {
+          leadField: 'certifications',
+          contactField: 'customFields.certifications',
+          leadValue: leadData.certifications || []
+        },
+        languages: {
+          leadField: 'languages',
+          contactField: 'customFields.languages',
+          leadValue: leadData.languages || []
+        },
+        interests: {
+          leadField: 'interests',
+          contactField: 'customFields.interests',
+          leadValue: leadData.interests || []
+        },
+        personalEmails: {
+          leadField: 'personalEmails',
+          contactField: 'customFields.personalEmails',
+          leadValue: Array.isArray(leadData.emails) ? leadData.emails.filter(email => email.type === 'personal').map(email => email.address) : []
+        },
+        workEmails: {
+          leadField: 'workEmails',
+          contactField: 'customFields.workEmails',
+          leadValue: Array.isArray(leadData.emails) ? leadData.emails.filter(email => email.type === 'work').map(email => email.address) : []
+        },
+        phoneNumbers: {
+          leadField: 'phoneNumbers',
+          contactField: 'customFields.phoneNumbers',
+          leadValue: leadData.phone_numbers || []
+        },
+        websites: {
+          leadField: 'websites',
+          contactField: 'customFields.websites',
+          leadValue: Array.isArray(leadData.profiles) ? leadData.profiles.filter(profile => profile.network === 'website').map(profile => profile.url) : []
+        },
+        githubUrl: {
+          leadField: 'githubUrl',
+          contactField: 'customFields.githubUrl',
+          leadValue: Array.isArray(leadData.profiles) ? leadData.profiles.find(profile => profile.network === 'github')?.url : null
+        },
+        twitterHandle: {
+          leadField: 'twitterHandle',
+          contactField: 'twitterHandle',
+          leadValue: Array.isArray(leadData.profiles) ? leadData.profiles.find(profile => profile.network === 'twitter')?.username : null
+        },
+        companyInfo: {
+          leadField: 'companyInfo',
+          contactField: 'customFields.companyInfo',
+          leadValue: this.extractCompanyInfo(leadData)
+        }
+      };
+      
+      // Apply selected enrichments
+      for (const fieldName of selectedFields) {
+        const mapping = fieldMappings[fieldName];
+        if (!mapping || !mapping.leadValue) continue;
+        
+        // Check if this is a custom field
+        if (mapping.contactField.startsWith('customFields.')) {
+          // Handle custom fields
+          if (!enrichmentData.customFields) {
+            enrichmentData.customFields = { ...contact.customFields };
+          }
+          
+          const customFieldKey = mapping.contactField.split('.')[1];
+          const currentValue = contact.customFields?.[customFieldKey];
+          
+          if (!currentValue || 
+              (Array.isArray(currentValue) && currentValue.length === 0) ||
+              (typeof currentValue === 'object' && Object.keys(currentValue).length === 0)) {
+            enrichmentData.customFields[customFieldKey] = mapping.leadValue;
+            
+            let displayValue = mapping.leadValue;
+            if (Array.isArray(mapping.leadValue)) {
+              displayValue = `${mapping.leadValue.length} items`;
+            } else if (typeof mapping.leadValue === 'object') {
+              displayValue = `${Object.keys(mapping.leadValue).length} items`;
+            }
+            
+            enrichmentLog.push(`Added ${fieldName}: ${displayValue}`);
+          } else {
+            enrichmentLog.push(`Skipped ${fieldName}: already has data`);
+          }
+        } else {
+          // Handle direct fields (phone, email, jobTitle, etc.)
+          const currentValue = contact[mapping.contactField];
+          if (!currentValue || (typeof currentValue === 'string' && currentValue.trim() === '')) {
+            enrichmentData[mapping.contactField] = mapping.leadValue;
+            enrichmentLog.push(`Added ${fieldName}: ${mapping.leadValue}`);
+          } else {
+            enrichmentLog.push(`Skipped ${fieldName}: already has data (${currentValue})`);
+          }
+        }
+      }
+      
+      // Auto-create company if companyName is being enriched and contact doesn't have a company
+      let companyCreated = false;
+      if (selectedFields.includes('companyName') && !contact.companyId && lead.companyName) {
+        const result = await this.findOrCreateCompany(lead);
+        if (result && result.company) {
+          enrichmentData.companyId = result.company.id;
+          companyCreated = result.isNewRecord;
+          enrichmentLog.push(`${result.isNewRecord ? 'Created and linked to new company' : 'Linked to existing company'}: ${result.company.name}`);
+        }
+      }
+
+      // Update contact if there are enrichments to apply
+      if (Object.keys(enrichmentData).length > 0) {
+        await contact.update(enrichmentData);
+        
+        // Add enrichment note
+        const enrichmentNote = `\n\n[ENRICHED ${new Date().toISOString()}] Data enriched from PDL lead "${lead.fullName}": ${enrichmentLog.join(', ')}`;
+        await contact.update({
+          notes: (contact.notes || '') + enrichmentNote
+        });
+      }
+      
+      return {
+        success: true,
+        contact: await Contact.findByPk(contactId, {
+          include: [{
+            model: Company,
+            as: 'company'
+          }]
+        }), // Return updated contact with company
+        enrichmentLog,
+        fieldsEnriched: selectedFields.length,
+        fieldsApplied: Object.keys(enrichmentData).length,
+        companyCreated
+      };
+      
+    } catch (error) {
+      console.error('Enrich contact error:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Find or create a company based on PDL lead data
+   */
+  async findOrCreateCompany(leadData) {
+    try {
+      if (!leadData.companyName) {
+        return null;
+      }
+
+      const companyName = leadData.companyName.trim();
+      if (!companyName) {
+        return null;
+      }
+
+      // First try to find existing company by name (case insensitive)
+      let company = await Company.findOne({
+        where: {
+          name: {
+            [Op.iLike]: companyName
+          }
+        }
+      });
+
+      if (company) {
+        console.log(`Found existing company: ${company.name}`);
+        return { company, isNewRecord: false };
+      }
+
+      // Extract company info from raw PDL data
+      const rawData = leadData.rawData || {};
+      const companyData = {
+        name: companyName
+      };
+
+      // Add industry if available
+      if (leadData.industry) {
+        companyData.industry = leadData.industry;
+      }
+
+      // Extract company website from PDL data
+      if (rawData.job_company_website) {
+        companyData.website = rawData.job_company_website;
+        // Extract domain from website
+        try {
+          const url = new URL(rawData.job_company_website);
+          companyData.domain = url.hostname;
+        } catch (e) {
+          // Invalid URL, skip domain extraction
+        }
+      }
+
+      // Map company size from PDL to our enum
+      if (rawData.job_company_size) {
+        const size = rawData.job_company_size.toLowerCase();
+        if (size.includes('startup') || size.includes('1-10')) {
+          companyData.size = 'startup';
+        } else if (size.includes('small') || size.includes('11-50')) {
+          companyData.size = 'small';
+        } else if (size.includes('medium') || size.includes('51-200') || size.includes('201-500')) {
+          companyData.size = 'medium';
+        } else if (size.includes('large') || size.includes('501-1000') || size.includes('1001-5000')) {
+          companyData.size = 'large';
+        } else if (size.includes('enterprise') || size.includes('5000+')) {
+          companyData.size = 'enterprise';
+        }
+      }
+
+      // Add company description if available
+      if (rawData.job_company_description) {
+        companyData.description = rawData.job_company_description;
+      }
+
+      // Add LinkedIn URL if available
+      if (rawData.job_company_linkedin_url) {
+        companyData.linkedinUrl = rawData.job_company_linkedin_url;
+      }
+
+      // Create new company
+      company = await Company.create(companyData);
+      console.log(`Created new company: ${company.name} (ID: ${company.id})`);
+      
+      return { company, isNewRecord: true };
+
+    } catch (error) {
+      console.error('Error finding/creating company:', error);
+      return null;
+    }
+  }
+
+  // Helper method to derive seniority level from job title
+  deriveSeniorityLevel(jobTitle) {
+    if (!jobTitle) return null;
+    
+    const title = jobTitle.toLowerCase();
+    
+    if (title.includes('ceo') || title.includes('cto') || title.includes('cfo') || 
+        title.includes('chief') || title.includes('president') || title.includes('founder')) {
+      return 'c_level';
+    }
+    
+    if (title.includes('vp') || title.includes('vice president') || title.includes('vice-president')) {
+      return 'vp';
+    }
+    
+    if (title.includes('director') || title.includes('head of')) {
+      return 'director';
+    }
+    
+    if (title.includes('senior') || title.includes('sr.') || title.includes('lead') || 
+        title.includes('principal') || title.includes('staff') || title.includes('architect')) {
+      return 'senior';
+    }
+    
+    if (title.includes('junior') || title.includes('jr.') || title.includes('entry') || 
+        title.includes('associate') || title.includes('intern')) {
+      return 'entry';
+    }
+    
+    return 'mid'; // Default to mid-level
+  }
+
+  // Helper method to extract social profiles
+  extractSocialProfiles(leadData) {
+    const profiles = {};
+    
+    if (leadData.profiles && Array.isArray(leadData.profiles)) {
+      leadData.profiles.forEach(profile => {
+        if (profile.network && profile.url) {
+          profiles[profile.network] = {
+            url: profile.url,
+            username: profile.username || profile.id
+          };
+        }
+      });
+    }
+    
+    return Object.keys(profiles).length > 0 ? profiles : null;
+  }
+
+  // Helper method to extract company information
+  extractCompanyInfo(leadData) {
+    const companyInfo = {};
+    
+    if (leadData.experience && Array.isArray(leadData.experience) && leadData.experience.length > 0) {
+      const currentJob = leadData.experience[0]; // Most recent job
+      
+      if (currentJob.company) {
+        companyInfo.name = currentJob.company.name;
+        companyInfo.industry = currentJob.company.industry;
+        companyInfo.size = currentJob.company.size;
+        companyInfo.type = currentJob.company.type;
+        companyInfo.website = currentJob.company.website;
+        companyInfo.location = currentJob.company.location;
+        companyInfo.startDate = currentJob.start_date;
+        companyInfo.endDate = currentJob.end_date;
+        companyInfo.title = currentJob.title;
+      }
+    }
+    
+    return Object.keys(companyInfo).length > 0 ? companyInfo : null;
   }
 }
 

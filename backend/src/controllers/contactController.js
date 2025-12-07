@@ -422,6 +422,66 @@ class ContactController {
       });
     }
   }
+
+  /**
+   * Find PDL leads that match a contact
+   */
+  async findPDLMatches(req, res) {
+    try {
+      const { id } = req.params;
+      const pdlService = require('../services/pdlService');
+
+      const contact = await Contact.findByPk(id, {
+        include: [{
+          model: Company,
+          as: 'company'
+        }]
+      });
+
+      if (!contact) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: 'NOT_FOUND',
+            message: 'Contact not found'
+          }
+        });
+      }
+
+      // Use the PDL service to find matching leads
+      const result = await pdlService.findLeadMatches(contact);
+
+      if (!result.success) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'MATCHING_ERROR',
+            message: result.error
+          }
+        });
+      }
+
+      res.json({
+        success: true,
+        data: {
+          contact: result.contact,
+          matches: result.matches,
+          totalMatches: result.matches.length
+        },
+        message: `Found ${result.matches.length} potential PDL lead matches`
+      });
+
+    } catch (error) {
+      console.error('Find PDL matches error:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'Failed to find PDL matches'
+        }
+      });
+    }
+  }
 }
 
 module.exports = new ContactController();

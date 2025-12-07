@@ -216,7 +216,7 @@ const Dashboard: React.FC = () => {
           'pending_review': 'orange',
           'added_to_crm': 'green',
           'rejected': 'red',
-          'reviewed': 'blue'
+          'duplicate': 'blue'
         };
         return (
           <Tag color={colors[status as keyof typeof colors] || 'default'}>
@@ -405,7 +405,7 @@ const Dashboard: React.FC = () => {
       <Card 
         title="Recent Leads" 
         style={{ marginTop: '24px' }}
-        extra={<Button type="link" onClick={() => navigate('/lead-review')}>View All Leads</Button>}
+        extra={<Button type="link" onClick={() => navigate('/pdl-leads')}>View All Leads</Button>}
       >
         <Table
           columns={recentLeadsColumns}

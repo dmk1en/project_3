@@ -31,7 +31,7 @@ router.get('/', [
     .withMessage('Invalid lead status'),
   query('source')
     .optional()
-    .isIn(['manual', 'linkedin', 'twitter', 'referral', 'website', 'email_campaign', 'cold_outreach', 'event'])
+    .isIn(['manual', 'linkedin', 'twitter', 'referral', 'website', 'email_campaign', 'cold_outreach', 'event', 'social_media', 'cold_call', 'trade_show', 'partner', 'pdl_discovery', 'other'])
     .withMessage('Invalid contact source'),
   query('assignedTo')
     .optional()
@@ -114,7 +114,7 @@ router.post('/', [
     .withMessage('Twitter handle must be 1-100 characters'),
   body('source')
     .notEmpty()
-    .isIn(['manual', 'linkedin', 'twitter', 'referral', 'website', 'email_campaign', 'cold_outreach', 'event', 'pdl_discovery'])
+    .isIn(['manual', 'linkedin', 'twitter', 'referral', 'website', 'email_campaign', 'cold_outreach', 'event', 'pdl_discovery', 'social_media', 'cold_call', 'trade_show', 'partner', 'other'])
     .withMessage('Valid source is required'),
   body('leadScore')
     .optional()
@@ -191,7 +191,7 @@ router.put('/:id', [
     .withMessage('Twitter handle must be 1-100 characters'),
   body('source')
     .optional()
-    .isIn(['manual', 'linkedin', 'twitter', 'referral', 'website', 'email_campaign', 'cold_outreach', 'event', 'pdl_discovery'])
+    .isIn(['manual', 'linkedin', 'twitter', 'referral', 'website', 'email_campaign', 'cold_outreach', 'event', 'pdl_discovery', 'social_media', 'cold_call', 'trade_show', 'partner', 'other'])
     .withMessage('Valid source is required'),
   body('leadScore')
     .optional()
@@ -259,5 +259,16 @@ router.post('/:id/convert', [
     .withMessage('Stage ID must be a valid UUID'),
   validate
 ], contactController.convertContact);
+
+/**
+ * @route   GET /api/v1/contacts/:id/pdl-matches
+ * @desc    Find PDL leads that match this contact
+ * @access  Private
+ */
+router.get('/:id/pdl-matches', [
+  authenticate,
+  validateUUID('id'),
+  validate
+], contactController.findPDLMatches);
 
 module.exports = router;

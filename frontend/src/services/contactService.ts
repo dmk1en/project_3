@@ -14,6 +14,15 @@ export interface Contact {
     id: string;
     name: string;
     industry?: string;
+    size?: 'startup' | 'small' | 'medium' | 'large' | 'enterprise';
+    website?: string;
+    domain?: string;
+    linkedinUrl?: string;
+    description?: string;
+    phone?: string;
+    twitterHandle?: string;
+    revenueRange?: string;
+    address?: any;
   };
   assignedTo?: string;
   assignedUser?: {
@@ -24,9 +33,28 @@ export interface Contact {
   leadStatus: 'new' | 'contacted' | 'qualified' | 'unqualified' | 'nurturing' | 'converted' | 'lost';
   leadScore: number;
   source: 'manual' | 'linkedin' | 'twitter' | 'referral' | 'website' | 'email_campaign' | 'cold_outreach' | 'event' | 'pdl_discovery';
+  seniorityLevel?: 'entry' | 'mid' | 'senior' | 'director' | 'vp' | 'c_level';
   linkedinUrl?: string;
   twitterHandle?: string;
   notes?: string;
+  customFields?: {
+    skills?: string[];
+    education?: any[];
+    experience?: any[];
+    languages?: string[];
+    certifications?: string[];
+    interests?: string[];
+    location?: string;
+    industry?: string;
+    currentCompany?: string;
+    personalEmails?: string[];
+    workEmails?: string[];
+    websites?: string[];
+    githubUrl?: string;
+    socialProfiles?: Record<string, any>;
+    phoneNumbers?: any[];
+    companyInfo?: any;
+  };
   createdAt: string;
   updatedAt: string;
 }
@@ -43,9 +71,28 @@ export interface CreateContactData {
   leadStatus?: 'new' | 'contacted' | 'qualified' | 'unqualified' | 'nurturing' | 'converted' | 'lost';
   leadScore?: number;
   source?: 'manual' | 'linkedin' | 'twitter' | 'referral' | 'website' | 'email_campaign' | 'cold_outreach' | 'event' | 'pdl_discovery';
+  seniorityLevel?: 'entry' | 'mid' | 'senior' | 'director' | 'vp' | 'c_level';
   linkedinUrl?: string;
   twitterHandle?: string;
   notes?: string;
+  customFields?: {
+    skills?: string[];
+    education?: any[];
+    experience?: any[];
+    languages?: string[];
+    certifications?: string[];
+    interests?: string[];
+    location?: string;
+    industry?: string;
+    currentCompany?: string;
+    personalEmails?: string[];
+    workEmails?: string[];
+    websites?: string[];
+    githubUrl?: string;
+    socialProfiles?: Record<string, any>;
+    phoneNumbers?: any[];
+    companyInfo?: any;
+  };
 }
 
 export interface UpdateContactData extends Partial<CreateContactData> {}
