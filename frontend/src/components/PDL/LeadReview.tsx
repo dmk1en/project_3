@@ -70,6 +70,7 @@ const LeadReview: React.FC<LeadReviewProps> = ({ onConvertLeads }) => {
   const [bulkActionVisible, setBulkActionVisible] = useState(false);
   const [manualLeadModalVisible, setManualLeadModalVisible] = useState(false);
   const [editingLead, setEditingLead] = useState<PotentialLead | null>(null);
+
   const [filters, setFilters] = useState({
     status: 'all',
     lead_type: 'all',
@@ -109,6 +110,8 @@ const LeadReview: React.FC<LeadReviewProps> = ({ onConvertLeads }) => {
     setManualLeadModalVisible(true);
   };
 
+
+
   const handleDeleteLead = async (lead: PotentialLead) => {
     Modal.confirm({
       title: 'Delete Lead',
@@ -132,7 +135,7 @@ const LeadReview: React.FC<LeadReviewProps> = ({ onConvertLeads }) => {
   const handleBulkDelete = async () => {
     const selectedLeadObjects = leads.filter(lead => selectedLeads.includes(lead.id));
     const manualLeads = selectedLeadObjects.filter(lead => lead.isManual || !lead.pdlProfileId);
-    const convertedLeads = selectedLeadObjects.filter(lead => lead.status === 'converted');
+    const convertedLeads = selectedLeadObjects.filter(lead => lead.status === 'added_to_crm');
     
     if (convertedLeads.length > 0) {
       message.error(`Cannot delete ${convertedLeads.length} leads that have been converted to CRM contacts`);
@@ -419,10 +422,10 @@ const LeadReview: React.FC<LeadReviewProps> = ({ onConvertLeads }) => {
 
   const getStatusColor = (status: string) => {
     const colors = {
-      pending: 'orange',
-      reviewed: 'blue',
-      converted: 'green',
-      rejected: 'red'
+      pending_review: 'orange',
+      added_to_crm: 'green',
+      rejected: 'red',
+      duplicate: 'blue'
     };
     return colors[status as keyof typeof colors] || 'default';
   };
@@ -574,10 +577,10 @@ const LeadReview: React.FC<LeadReviewProps> = ({ onConvertLeads }) => {
       key: 'status',
       width: 100,
       filters: [
-        { text: 'Pending', value: 'pending' },
-        { text: 'Reviewed', value: 'reviewed' },
-        { text: 'Converted', value: 'converted' },
+        { text: 'Pending Review', value: 'pending_review' },
+        { text: 'Added to CRM', value: 'added_to_crm' },
         { text: 'Rejected', value: 'rejected' },
+        { text: 'Duplicate', value: 'duplicate' },
       ],
       render: (status: string, record: PotentialLead) => (
         <Select
@@ -587,17 +590,17 @@ const LeadReview: React.FC<LeadReviewProps> = ({ onConvertLeads }) => {
           disabled
           title="Status updates not available for PDL data retrieval"
         >
-          <Option value="pending">
-            <Badge status="processing" text="Pending" />
+          <Option value="pending_review">
+            <Badge status="processing" text="Pending Review" />
           </Option>
-          <Option value="reviewed">
-            <Badge status="default" text="Reviewed" />
-          </Option>
-          <Option value="converted">
-            <Badge status="success" text="Converted" />
+          <Option value="added_to_crm">
+            <Badge status="success" text="Added to CRM" />
           </Option>
           <Option value="rejected">
             <Badge status="error" text="Rejected" />
+          </Option>
+          <Option value="duplicate">
+            <Badge status="default" text="Duplicate" />
           </Option>
         </Select>
       ),
@@ -622,6 +625,7 @@ const LeadReview: React.FC<LeadReviewProps> = ({ onConvertLeads }) => {
                 icon: <ReloadOutlined />,
                 onClick: () => handleEnrichLead(record)
               },
+
               ...(record.isManual || !record.pdlProfileId ? [{
                 key: 'edit',
                 label: 'Edit Lead',
@@ -639,7 +643,7 @@ const LeadReview: React.FC<LeadReviewProps> = ({ onConvertLeads }) => {
                 key: 'delete',
                 label: record.isManual || !record.pdlProfileId ? 'Delete Lead' : 'Delete Not Available',
                 icon: <DeleteOutlined />,
-                disabled: !(record.isManual || !record.pdlProfileId) || record.status === 'converted',
+                disabled: !(record.isManual || !record.pdlProfileId) || record.status === 'added_to_crm',
                 onClick: () => record.isManual || !record.pdlProfileId ? handleDeleteLead(record) : message.info('Delete not available for PDL-sourced leads')
               }
             ]
@@ -689,7 +693,7 @@ const LeadReview: React.FC<LeadReviewProps> = ({ onConvertLeads }) => {
           <Card>
             <Statistic 
               title="Conversion Rate" 
-              value={pagination.total > 0 ? Math.round((leads.filter(l => l.status === 'converted').length / pagination.total) * 100) : 0}
+              value={pagination.total > 0 ? Math.round((leads.filter(l => l.status === 'added_to_crm').length / pagination.total) * 100) : 0}
               suffix="%"
               prefix={<ExportOutlined />}
               valueStyle={{ color: '#722ed1' }}
@@ -713,13 +717,13 @@ const LeadReview: React.FC<LeadReviewProps> = ({ onConvertLeads }) => {
               <Select
                 value={filters.status}
                 onChange={(value) => setFilters({ ...filters, status: value })}
-                style={{ width: 120 }}
+                style={{ width: 150 }}
               >
                 <Option value="all">All Status</Option>
-                <Option value="pending">Pending</Option>
-                <Option value="reviewed">Reviewed</Option>
-                <Option value="converted">Converted</Option>
+                <Option value="pending_review">Pending Review</Option>
+                <Option value="added_to_crm">Added to CRM</Option>
                 <Option value="rejected">Rejected</Option>
+                <Option value="duplicate">Duplicate</Option>
               </Select>
             </Space>
           </Col>
@@ -939,10 +943,10 @@ const LeadReview: React.FC<LeadReviewProps> = ({ onConvertLeads }) => {
             <ul style={{ margin: '8px 0 0 0', paddingLeft: 20 }}>
               <li>Manual leads: {leads.filter(lead => selectedLeads.includes(lead.id) && (lead.isManual || !lead.pdlProfileId)).length}</li>
               <li>PDL-sourced leads: {leads.filter(lead => selectedLeads.includes(lead.id) && lead.pdlProfileId && !lead.isManual).length}</li>
-              <li>Converted leads: {leads.filter(lead => selectedLeads.includes(lead.id) && lead.status === 'converted').length}</li>
+              <li>Converted leads: {leads.filter(lead => selectedLeads.includes(lead.id) && lead.status === 'added_to_crm').length}</li>
             </ul>
             <p style={{ margin: '8px 0 0 0', fontSize: '12px', color: '#666' }}>
-              Note: Only manual leads can be deleted. Converted leads cannot be deleted.
+              Note: Only manual leads can be deleted. Leads added to CRM cannot be deleted.
             </p>
           </div>
         )}
@@ -972,9 +976,10 @@ const LeadReview: React.FC<LeadReviewProps> = ({ onConvertLeads }) => {
               style={{ flex: 1 }}
               onChange={(value) => handleBulkAction('status', value)}
             >
-              <Option value="pending">Pending</Option>
-              <Option value="reviewed">Reviewed</Option>
+              <Option value="pending_review">Pending Review</Option>
+              <Option value="added_to_crm">Added to CRM</Option>
               <Option value="rejected">Rejected</Option>
+              <Option value="duplicate">Duplicate</Option>
             </Select>
           </Space.Compact>
 
@@ -1016,6 +1021,9 @@ const LeadReview: React.FC<LeadReviewProps> = ({ onConvertLeads }) => {
         }}
         editingLead={editingLead}
       />
+
+      {/* Contact Enrichment Modal - This would need a different implementation for lead-to-contact matching */}
+      {/* For now, this feature is available in the Contacts page where you can enrich contacts with PDL lead data */}
     </div>
   );
 };

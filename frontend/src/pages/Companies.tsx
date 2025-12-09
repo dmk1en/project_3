@@ -48,6 +48,15 @@ const Companies: React.FC = () => {
   const [editingCompany, setEditingCompany] = useState<Company | null>(null);
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10, total: 0 });
+
+  // Helper function to format URLs properly
+  const formatUrl = (url: string | undefined) => {
+    if (!url) return '';
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return url;
+    }
+    return `https://${url}`;
+  };
   const [form] = Form.useForm();
 
   useEffect(() => {
@@ -282,7 +291,7 @@ const Companies: React.FC = () => {
           {company.website && (
             <div>
               <GlobalOutlined style={{ marginRight: '8px', color: '#faad14' }} />
-              <a href={company.website} target="_blank" rel="noopener noreferrer">
+              <a href={formatUrl(company.website)} target="_blank" rel="noopener noreferrer">
                 Website
               </a>
             </div>
@@ -580,7 +589,7 @@ const Companies: React.FC = () => {
                 <div>
                   <strong>Website:</strong>
                   <div>
-                    <a href={selectedCompany.website} target="_blank" rel="noopener noreferrer">
+                    <a href={formatUrl(selectedCompany.website)} target="_blank" rel="noopener noreferrer">
                       {selectedCompany.website}
                     </a>
                   </div>
@@ -613,7 +622,7 @@ const Companies: React.FC = () => {
                 <div>
                   <strong>LinkedIn:</strong>
                   <div>
-                    <a href={selectedCompany.linkedinUrl} target="_blank" rel="noopener noreferrer">
+                    <a href={formatUrl(selectedCompany.linkedinUrl)} target="_blank" rel="noopener noreferrer">
                       {selectedCompany.linkedinUrl}
                     </a>
                   </div>

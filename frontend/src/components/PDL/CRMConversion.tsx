@@ -109,13 +109,21 @@ const CRMConversion: React.FC<CRMConversionProps> = ({
     try {
       const result = await dispatch(convertToCRM(selectedLeads) as any).unwrap();
       
+      console.log('CRM Conversion result:', result);
+      
       if (result.success) {
-        message.success(`Successfully converted ${result.converted} leads to CRM contacts`);
+        let successMessage = `Successfully converted ${result.converted} leads to CRM contacts`;
+        if (result.companiesCreated && result.companiesCreated > 0) {
+          successMessage += `. ${result.companiesCreated} companies were automatically created.`;
+        }
+        console.log('Success message:', successMessage);
+        message.success(successMessage);
         setCurrentStep(3); // Move to success step
       } else {
         message.error('Conversion failed');
       }
     } catch (error) {
+      console.error('Conversion process failed:', error);
       message.error('Conversion process failed');
     }
   };
@@ -397,16 +405,16 @@ const CRMConversion: React.FC<CRMConversionProps> = ({
           title={isSuccess ? "Conversion Successful!" : "Conversion Failed"}
           subTitle={
             isSuccess 
-              ? `Successfully converted ${conversionResult.converted} out of ${selectedLeads.length} leads to CRM contacts.`
+              ? `Successfully converted ${conversionResult.converted} out of ${selectedLeads.length} leads to CRM contacts.${(conversionResult.companiesCreated && conversionResult.companiesCreated > 0) ? ` ${conversionResult.companiesCreated} companies were automatically created.` : ''}`
               : `Failed to convert leads. ${conversionResult.failed || 0} errors occurred.`
           }
           icon={isSuccess ? <CheckCircleOutlined /> : <ExclamationCircleOutlined />}
         >
           {isSuccess && (
             <Space direction="vertical" size="large">
-              <Card size="small" style={{ maxWidth: 400, margin: '0 auto' }}>
+              <Card size="small" style={{ maxWidth: 500, margin: '0 auto' }}>
                 <Row gutter={16}>
-                  <Col span={8}>
+                  <Col span={6}>
                     <Statistic
                       title="Converted"
                       value={conversionResult.converted}
@@ -414,7 +422,7 @@ const CRMConversion: React.FC<CRMConversionProps> = ({
                       prefix={<CheckCircleOutlined />}
                     />
                   </Col>
-                  <Col span={8}>
+                  <Col span={6}>
                     <Statistic
                       title="Failed"
                       value={conversionResult.failed}
@@ -422,7 +430,15 @@ const CRMConversion: React.FC<CRMConversionProps> = ({
                       prefix={<ExclamationCircleOutlined />}
                     />
                   </Col>
-                  <Col span={8}>
+                  <Col span={6}>
+                    <Statistic
+                      title="Companies Created"
+                      value={conversionResult.companiesCreated || 0}
+                      valueStyle={{ color: '#1890ff' }}
+                      prefix={<BankOutlined />}
+                    />
+                  </Col>
+                  <Col span={6}>
                     <Statistic
                       title="Success Rate"
                       value={Math.round((conversionResult.converted / selectedLeads.length) * 100)}

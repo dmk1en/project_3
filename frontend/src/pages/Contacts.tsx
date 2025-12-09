@@ -15,7 +15,9 @@ import {
   Drawer,
   Row,
   Col,
-  Divider
+  Divider,
+  AutoComplete,
+  Typography
 } from 'antd';
 import { 
   PlusOutlined, 
@@ -26,16 +28,27 @@ import {
   PhoneOutlined,
   MailOutlined,
   LinkedinOutlined,
-  TwitterOutlined
+  TwitterOutlined,
+  GithubOutlined,
+  BankOutlined,
+  TrophyOutlined,
+  BookOutlined,
+  GlobalOutlined,
+  CalendarOutlined,
+  StarOutlined,
+  CheckCircleOutlined
 } from '@ant-design/icons';
 import { contactService, Contact as ServiceContact, CreateContactData } from '../services/contactService';
 import { companyService, Company } from '../services/companyService';
 import { useSelector } from 'react-redux';
 import { RootState } from '../store';
 import { getErrorMessage } from '../utils/errorUtils';
+import ContactEnrichment from '../components/ContactEnrichment';
+import BulkContactEnrichment from '../components/BulkContactEnrichment';
 
 const { Search } = Input;
 const { Option } = Select;
+const { Text } = Typography;
 
 // Use the Contact interface from the service
 type Contact = ServiceContact;
@@ -54,6 +67,15 @@ const Contacts: React.FC = () => {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(false);
+
+  // Helper function to format URLs properly
+  const formatUrl = (url: string | undefined) => {
+    if (!url) return '';
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return url;
+    }
+    return `https://${url}`;
+  };
   const [searchText, setSearchText] = useState('');
   const [filters, setFilters] = useState({
     leadStatus: undefined as string | undefined,
@@ -69,6 +91,11 @@ const Contacts: React.FC = () => {
   const [isDrawerVisible, setIsDrawerVisible] = useState(false);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
+  const [enrichmentVisible, setEnrichmentVisible] = useState(false);
+  const [enrichmentContact, setEnrichmentContact] = useState<Contact | null>(null);
+  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
+  const [bulkEnrichmentVisible, setBulkEnrichmentVisible] = useState(false);
+  const [bulkEnrichmentContacts, setBulkEnrichmentContacts] = useState<Contact[]>([]);
   const [form] = Form.useForm();
   const [initialFormValues, setInitialFormValues] = useState<any>({});
 
@@ -165,7 +192,22 @@ const Contacts: React.FC = () => {
       source: contact.source,
       leadStatus: contact.leadStatus,
       leadScore: contact.leadScore,
+      seniorityLevel: contact.seniorityLevel,
       notes: contact.notes,
+      // Custom fields
+      skills: contact.customFields?.skills || [],
+      education: contact.customFields?.education || [],
+      experience: contact.customFields?.experience || [],
+      languages: contact.customFields?.languages || [],
+      certifications: contact.customFields?.certifications || [],
+      interests: contact.customFields?.interests || [],
+      location: contact.customFields?.location || '',
+      industry: contact.customFields?.industry || '',
+      currentCompany: contact.customFields?.currentCompany || '',
+      personalEmails: contact.customFields?.personalEmails || [],
+      workEmails: contact.customFields?.workEmails || [],
+      websites: contact.customFields?.websites || [],
+      githubUrl: contact.customFields?.githubUrl || '',
     };
     setInitialFormValues(formValues);
     setIsModalVisible(true);
@@ -174,6 +216,45 @@ const Contacts: React.FC = () => {
   const handleViewContact = (contact: Contact) => {
     setSelectedContact(contact);
     setIsDrawerVisible(true);
+  };
+
+  const handleEnrichContact = (contact: Contact) => {
+    setEnrichmentContact(contact);
+    setEnrichmentVisible(true);
+  };
+
+  const handleEnrichmentComplete = (enrichedContact: Contact) => {
+    message.success(`Contact ${enrichedContact.firstName} ${enrichedContact.lastName} enriched successfully`);
+    loadContacts(pagination.current, pagination.pageSize, searchText);
+    setEnrichmentVisible(false);
+    setEnrichmentContact(null);
+  };
+
+  const handleBulkEnrich = () => {
+    const selectedContacts = contacts.filter(contact => selectedRowKeys.includes(contact.id));
+    if (selectedContacts.length === 0) {
+      message.warning('Please select contacts to enrich');
+      return;
+    }
+    setBulkEnrichmentContacts(selectedContacts);
+    setBulkEnrichmentVisible(true);
+  };
+
+  const handleBulkEnrichmentComplete = (enrichedContacts: Contact[]) => {
+    message.success(`${enrichedContacts.length} contact(s) enriched successfully`);
+    loadContacts(pagination.current, pagination.pageSize, searchText);
+    setBulkEnrichmentVisible(false);
+    setBulkEnrichmentContacts([]);
+    setSelectedRowKeys([]);
+  };
+
+  const handleSelectAll = () => {
+    const allContactIds = contacts.map(contact => contact.id);
+    setSelectedRowKeys(allContactIds);
+  };
+
+  const handleClearSelection = () => {
+    setSelectedRowKeys([]);
   };
 
   const handleDeleteContact = async (contactId: string) => {
@@ -196,14 +277,29 @@ const Contacts: React.FC = () => {
         phone: values.phone,
         title: values.title,
         department: values.department,
-
         companyId: values.companyId,
         linkedinUrl: values.linkedinUrl,
         twitterHandle: values.twitterHandle,
         source: values.source || 'manual',
         leadStatus: values.leadStatus || 'new',
         leadScore: values.leadScore || 0,
+        seniorityLevel: values.seniorityLevel,
         notes: values.notes,
+        customFields: {
+          skills: values.skills || [],
+          education: values.education || [],
+          experience: values.experience || [],
+          languages: values.languages || [],
+          certifications: values.certifications || [],
+          interests: values.interests || [],
+          location: values.location || '',
+          industry: values.industry || '',
+          currentCompany: values.currentCompany || '',
+          personalEmails: values.personalEmails || [],
+          workEmails: values.workEmails || [],
+          websites: values.websites || [],
+          githubUrl: values.githubUrl || '',
+        },
       };
 
       // Clean up the data - remove empty strings and undefined values
@@ -313,7 +409,7 @@ const Contacts: React.FC = () => {
             <Button 
               type="link" 
               icon={<LinkedinOutlined />} 
-              href={contact.linkedinUrl}
+              href={formatUrl(contact.linkedinUrl)}
               target="_blank"
               size="small"
             />
@@ -362,6 +458,13 @@ const Contacts: React.FC = () => {
             onClick={() => handleEditContact(contact)}
           >
             Edit
+          </Button>
+          <Button 
+            type="link" 
+            onClick={() => handleEnrichContact(contact)}
+            style={{ color: '#722ed1' }}
+          >
+            Enrich
           </Button>
           <Popconfirm
             title="Are you sure you want to delete this contact?"
@@ -426,22 +529,32 @@ const Contacts: React.FC = () => {
               </Select>
             </Col>
             <Col span={6}>
-              <Select
+              <AutoComplete
                 placeholder="Filter by Source"
                 allowClear
                 value={filters.source || undefined}
                 onChange={(value) => setFilters(prev => ({ ...prev, source: value }))}
                 style={{ width: '100%' }}
-              >
-                <Option value="website">Website</Option>
-                <Option value="social_media">Social Media</Option>
-                <Option value="email_campaign">Email Campaign</Option>
-                <Option value="referral">Referral</Option>
-                <Option value="cold_call">Cold Call</Option>
-                <Option value="trade_show">Trade Show</Option>
-                <Option value="partner">Partner</Option>
-                <Option value="other">Other</Option>
-              </Select>
+                options={[
+                  { value: 'website' },
+                  { value: 'social_media' },
+                  { value: 'email_campaign' },
+                  { value: 'referral' },
+                  { value: 'cold_call' },
+                  { value: 'trade_show' },
+                  { value: 'partner' },
+                  { value: 'manual' },
+                  { value: 'linkedin' },
+                  { value: 'twitter' },
+                  { value: 'pdl_discovery' },
+                  { value: 'cold_outreach' },
+                  { value: 'event' },
+                  { value: 'other' }
+                ]}
+                filterOption={(inputValue, option) =>
+                  option!.value.toLowerCase().indexOf(inputValue.toLowerCase()) !== -1
+                }
+              />
             </Col>
             <Col span={6}>
               <Select
@@ -468,11 +581,63 @@ const Contacts: React.FC = () => {
           </Row>
         </div>
 
+        {/* Bulk Actions */}
+        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <Space>
+              <Button 
+                onClick={handleSelectAll}
+                disabled={contacts.length === 0}
+              >
+                Select All
+              </Button>
+              <Button 
+                onClick={handleClearSelection}
+                disabled={selectedRowKeys.length === 0}
+              >
+                Clear Selection
+              </Button>
+              <Button 
+                type="primary"
+                onClick={handleBulkEnrich}
+                disabled={selectedRowKeys.length === 0}
+                style={{ backgroundColor: '#722ed1', borderColor: '#722ed1' }}
+              >
+                Enrich Selected ({selectedRowKeys.length})
+              </Button>
+            </Space>
+          </div>
+          {selectedRowKeys.length > 0 && (
+            <div>
+              <Text type="secondary">
+                {selectedRowKeys.length} of {contacts.length} contacts selected
+              </Text>
+            </div>
+          )}
+        </div>
+
         <Table
           columns={columns}
           dataSource={filteredContacts}
           rowKey="id"
           loading={loading}
+          rowSelection={{
+            selectedRowKeys,
+            onChange: (selectedKeys: React.Key[]) => {
+              setSelectedRowKeys(selectedKeys as string[]);
+            },
+            onSelectAll: (selected, selectedRows, changeRows) => {
+              if (selected) {
+                const allKeys = contacts.map(contact => contact.id);
+                setSelectedRowKeys(allKeys);
+              } else {
+                setSelectedRowKeys([]);
+              }
+            },
+            getCheckboxProps: (record: Contact) => ({
+              name: record.firstName + ' ' + record.lastName,
+            }),
+          }}
           pagination={{
             ...pagination,
             showTotal: (total) => `Total ${total} contacts`,
@@ -554,6 +719,26 @@ const Contacts: React.FC = () => {
 
           <Row gutter={16}>
             <Col span={12}>
+              <Form.Item name="seniorityLevel" label="Seniority Level">
+                <Select placeholder="Select seniority level" allowClear>
+                  <Option value="entry">Entry</Option>
+                  <Option value="mid">Mid</Option>
+                  <Option value="senior">Senior</Option>
+                  <Option value="director">Director</Option>
+                  <Option value="vp">VP</Option>
+                  <Option value="c_level">C-Level</Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="location" label="Location">
+                <Input placeholder="Enter location" />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col span={12}>
               <Form.Item name="department" label="Department">
                 <Input placeholder="Enter department" />
               </Form.Item>
@@ -580,6 +765,19 @@ const Contacts: React.FC = () => {
               ))}
             </Select>
           </Form.Item>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="industry" label="Industry">
+                <Input placeholder="Enter industry" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="currentCompany" label="Current Company (Text)">
+                <Input placeholder="Enter current company name" />
+              </Form.Item>
+            </Col>
+          </Row>
 
           <Row gutter={16}>
             <Col span={12}>
@@ -629,6 +827,80 @@ const Contacts: React.FC = () => {
             <Input 
               placeholder="@username or username" 
               prefix={<TwitterOutlined />}
+            />
+          </Form.Item>
+
+          <Form.Item name="githubUrl" label="GitHub Profile">
+            <Input 
+              placeholder="https://github.com/username" 
+              prefix={<GithubOutlined />}
+            />
+          </Form.Item>
+
+          <Divider orientation="left">Professional Data (Enriched from PDL)</Divider>
+
+          <Form.Item name="skills" label="Skills">
+            <Select
+              mode="tags"
+              placeholder="Enter skills (press enter to add)"
+              style={{ width: '100%' }}
+              tokenSeparators={[',']}
+            />
+          </Form.Item>
+
+          <Form.Item name="languages" label="Languages">
+            <Select
+              mode="tags"
+              placeholder="Enter languages (press enter to add)"
+              style={{ width: '100%' }}
+              tokenSeparators={[',']}
+            />
+          </Form.Item>
+
+          <Form.Item name="certifications" label="Certifications">
+            <Select
+              mode="tags"
+              placeholder="Enter certifications (press enter to add)"
+              style={{ width: '100%' }}
+              tokenSeparators={[',']}
+            />
+          </Form.Item>
+
+          <Form.Item name="interests" label="Interests">
+            <Select
+              mode="tags"
+              placeholder="Enter interests (press enter to add)"
+              style={{ width: '100%' }}
+              tokenSeparators={[',']}
+            />
+          </Form.Item>
+
+          <Divider orientation="left">Contact Information (Enriched)</Divider>
+
+          <Form.Item name="personalEmails" label="Personal Emails">
+            <Select
+              mode="tags"
+              placeholder="Enter personal emails (press enter to add)"
+              style={{ width: '100%' }}
+              tokenSeparators={[',']}
+            />
+          </Form.Item>
+
+          <Form.Item name="workEmails" label="Work Emails">
+            <Select
+              mode="tags"
+              placeholder="Enter work emails (press enter to add)"
+              style={{ width: '100%' }}
+              tokenSeparators={[',']}
+            />
+          </Form.Item>
+
+          <Form.Item name="websites" label="Personal Websites">
+            <Select
+              mode="tags"
+              placeholder="Enter websites (press enter to add)"
+              style={{ width: '100%' }}
+              tokenSeparators={[',']}
             />
           </Form.Item>
 
@@ -687,8 +959,79 @@ const Contacts: React.FC = () => {
 
               {selectedContact.company && (
                 <div>
-                  <strong>Company:</strong>
-                  <div>{selectedContact.company.name}</div>
+                  <strong><BankOutlined /> Company:</strong>
+                  <div>
+                    <div style={{ fontWeight: 'bold' }}>{selectedContact.company.name}</div>
+                    {selectedContact.company.industry && (
+                      <div style={{ fontSize: '12px', color: '#666' }}>Industry: {selectedContact.company.industry}</div>
+                    )}
+                    {selectedContact.company.size && (
+                      <div style={{ fontSize: '12px', color: '#666' }}>Size: {selectedContact.company.size}</div>
+                    )}
+                    {selectedContact.company.website && (
+                      <div style={{ fontSize: '12px', color: '#666' }}>
+                        Website: <a href={formatUrl(selectedContact.company.website)} target="_blank" rel="noopener noreferrer">
+                          {selectedContact.company.website}
+                        </a>
+                      </div>
+                    )}
+                    {selectedContact.company.domain && (
+                      <div style={{ fontSize: '12px', color: '#666' }}>Domain: {selectedContact.company.domain}</div>
+                    )}
+                    {selectedContact.company.linkedinUrl && (
+                      <div style={{ fontSize: '12px', color: '#666' }}>
+                        LinkedIn: <a href={formatUrl(selectedContact.company.linkedinUrl)} target="_blank" rel="noopener noreferrer">
+                          Company Page
+                        </a>
+                      </div>
+                    )}
+                    {selectedContact.company.description && (
+                      <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                        {selectedContact.company.description.length > 100 
+                          ? `${selectedContact.company.description.substring(0, 100)}...`
+                          : selectedContact.company.description
+                        }
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {selectedContact.customFields?.experience && selectedContact.customFields.experience.length > 0 && (
+                <div>
+                  <strong><TrophyOutlined /> Professional Experience:</strong>
+                  <div>
+                    {selectedContact.customFields.experience.slice(0, 3).map((exp: any, idx: number) => (
+                      <div key={idx} style={{ marginBottom: '8px', padding: '8px', backgroundColor: '#f5f5f5', borderRadius: '4px' }}>
+                        <div style={{ fontWeight: 'bold' }}>
+                          {typeof exp.title === 'object' && exp.title ? exp.title.name || 'Position' : exp.title || 'Position'}
+                        </div>
+                        <div style={{ color: '#666', fontSize: '12px' }}>
+                          {exp.company?.name || 'Company'}
+                          {exp.start_date && (
+                            <span> • {new Date(exp.start_date).getFullYear()} - {exp.end_date ? new Date(exp.end_date).getFullYear() : 'Present'}</span>
+                          )}
+                        </div>
+                        {exp.summary && (
+                          <div style={{ fontSize: '12px', marginTop: '4px' }}>{exp.summary.substring(0, 100)}...</div>
+                        )}
+                      </div>
+                    ))}
+                    {selectedContact.customFields.experience.length > 3 && (
+                      <div style={{ fontSize: '12px', color: '#666' }}>+{selectedContact.customFields.experience.length - 3} more positions</div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {(selectedContact.customFields as any)?.seniorityLevel && (
+                <div>
+                  <strong><StarOutlined /> Seniority Level:</strong>
+                  <div>
+                    <Tag color={(selectedContact.customFields as any).seniorityLevel === 'senior' ? 'gold' : (selectedContact.customFields as any).seniorityLevel === 'mid' ? 'blue' : 'green'}>
+                      {String((selectedContact.customFields as any).seniorityLevel || '').toUpperCase()}
+                    </Tag>
+                  </div>
                 </div>
               )}
 
@@ -700,7 +1043,7 @@ const Contacts: React.FC = () => {
                       <Button 
                         type="link" 
                         icon={<LinkedinOutlined />}
-                        href={selectedContact.linkedinUrl}
+                        href={formatUrl(selectedContact.linkedinUrl)}
                         target="_blank"
                       >
                         LinkedIn
@@ -739,6 +1082,186 @@ const Contacts: React.FC = () => {
                 <div>{selectedContact.source}</div>
               </div>
 
+              {selectedContact.customFields && Object.keys(selectedContact.customFields).length > 0 && (
+                <div>
+                  <strong><CheckCircleOutlined /> Enrichment Status:</strong>
+                  <div>
+                    <Tag color="green" icon={<UserOutlined />}>
+                      PDL Enriched
+                    </Tag>
+                    <div style={{ fontSize: '11px', color: '#666', marginTop: '2px' }}>
+                      {Object.keys(selectedContact.customFields).length} enriched fields
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {(selectedContact.customFields as any)?.dataSource && (
+                <div>
+                  <strong>Data Source:</strong>
+                  <div style={{ fontSize: '12px', color: '#666' }}>{(selectedContact.customFields as any).dataSource}</div>
+                </div>
+              )}
+
+              {selectedContact.customFields?.skills && selectedContact.customFields.skills.length > 0 && (
+                <div>
+                  <strong>Skills:</strong>
+                  <div>
+                    {selectedContact.customFields.skills.slice(0, 10).map((skill: any, idx: number) => (
+                      <Tag key={idx} color="blue">
+                        {typeof skill === 'object' && skill ? (skill.name || skill.skill || 'Skill') : String(skill || '')}
+                      </Tag>
+                    ))}
+                    {selectedContact.customFields.skills.length > 10 && (
+                      <Tag>+{selectedContact.customFields.skills.length - 10} more</Tag>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {selectedContact.customFields?.education && selectedContact.customFields.education.length > 0 && (
+                <div>
+                  <strong><BookOutlined /> Education:</strong>
+                  <div>
+                    {selectedContact.customFields.education.slice(0, 2).map((edu: any, idx: number) => (
+                      <div key={idx} style={{ marginBottom: '8px', padding: '8px', backgroundColor: '#f0f8f0', borderRadius: '4px' }}>
+                        <div style={{ fontWeight: 'bold' }}>{edu.school?.name || 'School'}</div>
+                        <div style={{ color: '#666', fontSize: '12px' }}>
+                          {typeof edu.degree_name === 'object' && edu.degree_name ? edu.degree_name.name || 'Degree' : edu.degree_name || 'Degree'}
+                          {edu.majors && Array.isArray(edu.majors) && edu.majors.length > 0 && (
+                            <span> • {edu.majors.join(', ')}</span>
+                          )}
+                        </div>
+                        {edu.start_date && edu.end_date && (
+                          <div style={{ fontSize: '12px', color: '#666' }}>
+                            {new Date(edu.start_date).getFullYear()} - {new Date(edu.end_date).getFullYear()}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {selectedContact.customFields.education.length > 2 && (
+                      <div style={{ fontSize: '12px', color: '#666' }}>+{selectedContact.customFields.education.length - 2} more institutions</div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {selectedContact.customFields?.languages && selectedContact.customFields.languages.length > 0 && (
+                <div>
+                  <strong>Languages:</strong>
+                  <div>
+                    {selectedContact.customFields.languages.map((lang: any, idx: number) => (
+                      <Tag key={idx} color="cyan">
+                        {typeof lang === 'object' && lang ? (lang.name || lang.language || 'Language') : String(lang || '')}
+                      </Tag>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {selectedContact.customFields?.location && (
+                <div>
+                  <strong><GlobalOutlined /> Location:</strong>
+                  <div>{selectedContact.customFields.location}</div>
+                </div>
+              )}
+
+              {selectedContact.customFields?.industry && (
+                <div>
+                  <strong>Industry:</strong>
+                  <div>{selectedContact.customFields.industry}</div>
+                </div>
+              )}
+
+              {selectedContact.customFields?.certifications && selectedContact.customFields.certifications.length > 0 && (
+                <div>
+                  <strong>Certifications:</strong>
+                  <div>
+                    {selectedContact.customFields.certifications.map((cert: any, idx: number) => (
+                      <Tag key={idx} color="gold">
+                        {typeof cert === 'object' && cert ? (cert.name || cert.certification || 'Certification') : String(cert || '')}
+                      </Tag>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {selectedContact.customFields?.githubUrl && (
+                <div>
+                  <strong>GitHub:</strong>
+                  <div>
+                    <Button 
+                      type="link" 
+                      icon={<GithubOutlined />}
+                      href={formatUrl(selectedContact.customFields.githubUrl)}
+                      target="_blank"
+                    >
+                      GitHub Profile
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {(selectedContact.customFields as any)?.workEmail && (selectedContact.customFields as any).workEmail !== selectedContact.email && (
+                <div>
+                  <strong>Work Email:</strong>
+                  <div>{(selectedContact.customFields as any).workEmail}</div>
+                </div>
+              )}
+
+              {(selectedContact.customFields as any)?.mobilePhone && (
+                <div>
+                  <strong>Mobile Phone:</strong>
+                  <div>{(selectedContact.customFields as any).mobilePhone}</div>
+                </div>
+              )}
+
+              {(selectedContact.customFields as any)?.jobChangeDate && (
+                <div>
+                  <strong><CalendarOutlined /> Recent Job Change:</strong>
+                  <div>{new Date((selectedContact.customFields as any).jobChangeDate).toLocaleDateString()}</div>
+                </div>
+              )}
+
+              {selectedContact.customFields?.personalEmails && selectedContact.customFields.personalEmails.length > 0 && (
+                <div>
+                  <strong>Personal Emails:</strong>
+                  <div>
+                    {selectedContact.customFields.personalEmails.slice(0, 2).map((email: any, idx: number) => (
+                      <div key={idx} style={{ fontSize: '12px', color: '#666' }}>
+                        {typeof email === 'object' && email ? (email.email || email.address || 'Email') : String(email || '')}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {selectedContact.customFields?.interests && selectedContact.customFields.interests.length > 0 && (
+                <div>
+                  <strong>Interests:</strong>
+                  <div>
+                    {selectedContact.customFields.interests.slice(0, 8).map((interest: string, idx: number) => (
+                      <Tag key={idx} color="purple" style={{ marginBottom: '4px' }}>{interest}</Tag>
+                    ))}
+                    {selectedContact.customFields.interests.length > 8 && (
+                      <Tag>+{selectedContact.customFields.interests.length - 8} more</Tag>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {(selectedContact.customFields as any)?.summary && (
+                <div>
+                  <strong>Professional Summary:</strong>
+                  <div style={{ fontSize: '12px', lineHeight: '1.4', backgroundColor: '#f9f9f9', padding: '8px', borderRadius: '4px' }}>
+                    {(selectedContact.customFields as any).summary.length > 200 
+                      ? (selectedContact.customFields as any).summary.substring(0, 200) + '...' 
+                      : (selectedContact.customFields as any).summary
+                    }
+                  </div>
+                </div>
+              )}
+
               {selectedContact.notes && (
                 <div>
                   <strong>Notes:</strong>
@@ -765,10 +1288,41 @@ const Contacts: React.FC = () => {
               >
                 Edit Contact
               </Button>
+              <Button 
+                onClick={() => {
+                  setIsDrawerVisible(false);
+                  handleEnrichContact(selectedContact);
+                }}
+                style={{ color: '#722ed1', borderColor: '#722ed1' }}
+              >
+                Enrich with PDL Data
+              </Button>
             </Space>
           </div>
         )}
       </Drawer>
+
+      {/* Contact Enrichment Modal */}
+      <ContactEnrichment
+        visible={enrichmentVisible}
+        contact={enrichmentContact}
+        onClose={() => {
+          setEnrichmentVisible(false);
+          setEnrichmentContact(null);
+        }}
+        onEnrichComplete={handleEnrichmentComplete}
+      />
+
+      {/* Bulk Contact Enrichment Modal */}
+      <BulkContactEnrichment
+        visible={bulkEnrichmentVisible}
+        contacts={bulkEnrichmentContacts}
+        onClose={() => {
+          setBulkEnrichmentVisible(false);
+          setBulkEnrichmentContacts([]);
+        }}
+        onEnrichComplete={handleBulkEnrichmentComplete}
+      />
     </div>
   );
 };

@@ -137,6 +137,18 @@ router.post('/leads/bulk',
   pdlController.bulkOperation
 );
 
+// GET /api/pdl/leads/:id/matches - Find contact matches for a lead
+router.get('/leads/:id/matches', 
+  requirePermission('read_leads'), 
+  pdlController.findContactMatches
+);
+
+// POST /api/pdl/contacts/:contactId/enrich - Enrich contact with lead data
+router.post('/contacts/:contactId/enrich', 
+  requirePermission('manage_contacts'), 
+  pdlController.enrichContactWithLead
+);
+
 // PDL Search Operations
 // POST /api/pdl/search - Execute a PDL search
 router.post('/search', 

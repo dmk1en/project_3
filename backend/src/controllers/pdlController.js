@@ -178,6 +178,18 @@ class PDLController {
         }
       }
 
+      // Auto-create company if company name is available
+      let companyId = null;
+      let companyCreated = false;
+      if (potentialLead.companyName) {
+        const result = await pdlService.findOrCreateCompany(potentialLead);
+        if (result && result.company) {
+          companyId = result.company.id;
+          companyCreated = result.isNewRecord;
+          console.log(`${companyCreated ? 'Created new' : 'Found existing'} company: ${result.company.name} for lead: ${potentialLead.fullName}`);
+        }
+      }
+
       // Create new contact from potential lead
       const contactData = {
         firstName: potentialLead.fullName?.split(' ')[0] || '',
@@ -185,10 +197,11 @@ class PDLController {
         email: potentialLead.email,
         phone: potentialLead.phone,
         jobTitle: potentialLead.jobTitle,
+        companyId: companyId,
         source: 'pdl_discovery',
         linkedinUrl: potentialLead.linkedinUrl,
         assignedTo: userId,
-        notes: `Discovered via PDL on ${potentialLead.retrievedAt?.toDateString()}. Lead Score: ${potentialLead.leadScore}`,
+        notes: `Discovered via PDL on ${potentialLead.retrievedAt?.toDateString()}. Lead Score: ${potentialLead.leadScore}${companyCreated ? `. Company "${potentialLead.companyName}" was automatically created.` : ''}`,
         leadScore: potentialLead.leadScore,
         leadStatus: potentialLead.leadScore >= 70 ? 'qualified' : 'new'
       };
@@ -214,13 +227,22 @@ class PDLController {
         console.log('Skipping enrichment for PDL-sourced contact (use forceEnrich=true to override):', newContact.id);
       }
 
+      // Fetch the complete contact with company relationship
+      const completeContact = await Contact.findByPk(newContact.id, {
+        include: [{
+          model: require('../models/Company'),
+          as: 'company'
+        }]
+      });
+
       res.status(201).json({
         success: true,
         data: {
-          contact: newContact,
-          potentialLead: potentialLead
+          contact: completeContact,
+          potentialLead: potentialLead,
+          companyCreated: companyCreated
         },
-        message: 'Lead successfully added to CRM'
+        message: `Lead successfully added to CRM${companyCreated ? ` and company "${potentialLead.companyName}" was automatically created` : ''}`
       });
       
     } catch (error) {
@@ -1287,7 +1309,9 @@ class PDLController {
    * Helper methods for bulk operations
    */
   async bulkAddToCRM(leadIds, userId) {
-    const results = { success: 0, failed: 0, errors: [] };
+    const results = { success: 0, failed: 0, errors: [], companiesCreated: 0 };
+
+    console.log('Starting bulk add to CRM for leadIds:', leadIds);
 
     for (const leadId of leadIds) {
       try {
@@ -1299,8 +1323,13 @@ class PDLController {
         const mockRes = {
           status: () => mockRes,
           json: (data) => {
+            console.log(`Lead ${leadId} result:`, data);
             if (data.success) {
               results.success++;
+              if (data.data?.companyCreated) {
+                console.log(`Company created for lead ${leadId}`);
+                results.companiesCreated++;
+              }
             } else {
               results.failed++;
               results.errors.push({ leadId, error: data.error.message });
@@ -1316,6 +1345,7 @@ class PDLController {
       }
     }
 
+    console.log('Bulk add to CRM results:', results);
     return results;
   }
 
@@ -1368,6 +1398,101 @@ class PDLController {
     }
 
     return results;
+  }
+
+  /**
+   * Find contact matches for a potential lead
+   */
+  async findContactMatches(req, res) {
+    try {
+      const { id } = req.params;
+
+      const result = await pdlService.findContactMatches(id);
+
+      if (!result.success) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'MATCHING_ERROR',
+            message: result.error
+          }
+        });
+      }
+
+      res.json({
+        success: true,
+        data: {
+          lead: result.lead,
+          matches: result.matches,
+          totalMatches: result.matches.length
+        },
+        message: `Found ${result.matches.length} potential matches`
+      });
+
+    } catch (error) {
+      console.error('Find contact matches error:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'Failed to find contact matches'
+        }
+      });
+    }
+  }
+
+  /**
+   * Enrich contact with lead data
+   */
+  async enrichContactWithLead(req, res) {
+    try {
+      const { contactId } = req.params;
+      const { leadId, selectedFields } = req.body;
+
+      if (!leadId || !Array.isArray(selectedFields) || selectedFields.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'INVALID_INPUT',
+            message: 'Lead ID and selected fields array are required'
+          }
+        });
+      }
+
+      const result = await pdlService.enrichContact(contactId, leadId, selectedFields);
+
+      if (!result.success) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'ENRICHMENT_ERROR',
+            message: result.error
+          }
+        });
+      }
+
+      res.json({
+        success: true,
+        data: {
+          contact: result.contact,
+          enrichmentLog: result.enrichmentLog,
+          fieldsEnriched: result.fieldsEnriched,
+          fieldsApplied: result.fieldsApplied,
+          companyCreated: result.companyCreated
+        },
+        message: `Contact enriched successfully. ${result.fieldsApplied} fields updated.`
+      });
+
+    } catch (error) {
+      console.error('Enrich contact error:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'Failed to enrich contact'
+        }
+      });
+    }
   }
 }
 

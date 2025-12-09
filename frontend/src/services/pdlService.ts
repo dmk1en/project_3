@@ -60,6 +60,7 @@ export interface ConversionResult {
   failed: number;
   errors?: string[];
   message?: string;
+  companiesCreated?: number;
 }
 
 class PDLService {
@@ -239,17 +240,23 @@ class PDLService {
       operation: 'addToCRM' 
     });
     
+    console.log('Backend response for convertToCRM:', response.data);
+    
     // Map backend response to expected format
     const backendData = response.data;
-    return {
+    const result = {
       success: backendData.success,
       converted: backendData.data?.success || 0,
       failed: backendData.data?.failed || 0,
+      companiesCreated: backendData.data?.companiesCreated || 0,
       errors: backendData.data?.errors?.map((err: any) => 
         typeof err === 'string' ? err : err.error || 'Unknown error'
       ) || [],
       message: backendData.message
     };
+    
+    console.log('Mapped result:', result);
+    return result;
   }
 
   // Bulk update leads
